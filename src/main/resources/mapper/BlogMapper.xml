@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.codechronicles.core.mapper.BlogMapper">
+
+    <select id="selectProfile" resultType="com.codechronicles.core.domain.Profile">
+        select id, nickname, account, avatar, bio, role, location, followers
+        from profile
+        order by id
+        limit 1
+    </select>
+
+    <select id="selectProfileSkills" resultType="string">
+        select skill
+        from profile_skill
+        where profile_id = #{profileId}
+        order by sort_order, id
+    </select>
+
+    <select id="selectProfileLinks" resultType="com.codechronicles.core.domain.ProfileLink">
+        select id, label, url
+        from profile_link
+        where profile_id = #{profileId}
+        order by sort_order, id
+    </select>
+
+    <select id="selectTags" resultType="com.codechronicles.core.domain.Tag">
+        select
+            t.id,
+            t.name,
+            count(a.id) as article_count
+        from tag t
+        left join article_tag at on at.tag_id = t.id
+        left join article a on a.id = at.article_id and a.status = 'PUBLISHED'
+        group by t.id, t.name, t.sort_order
+        order by t.sort_order, t.id
+    </select>
+
+    <select id="countArticles" resultType="long">
+        select count(distinct a.id)
+        from article a
+        <if test="tagId != null">
+            inner join article_tag at on at.article_id = a.id
+        </if>
+        where a.status = 'PUBLISHED'
+        <if test="tagId != null">
+            and at.tag_id = #{tagId}
+        </if>
+    </select>
+
+    <select id="countTags" resultType="int">
+        select count(*) from tag
+    </select>
+
+    <select id="countQuestions" resultType="int">
+        select count(*) from question
+    </select>
+
+    <select id="selectArticles" resultType="com.codechronicles.core.domain.Article">
+        select distinct
+            a.id,
+            a.title,
+            a.summary,
+            a.cover,
+            a.category,
+            a.content,
+            a.published_at,
+            a.updated_at,
+            a.views,
+            a.likes,
+            a.comments
+        from article a
+        <if test="tagId != null">
+            inner join article_tag at on at.article_id = a.id
+        </if>
+        where a.status = 'PUBLISHED'
+        <if test="tagId != null">
+            and at.tag_id = #{tagId}
+        </if>
+        order by a.published_at desc, a.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="selectArticleById" resultType="com.codechronicles.core.domain.Article">
+        select id, title, summary, cover, category, content, published_at, updated_at, views, likes, comments
+        from article
+        where id = #{id}
+          and status = 'PUBLISHED'
+    </select>
+
+    <select id="selectArticleTags" resultType="string">
+        select t.name
+        from tag t
+        inner join article_tag at on at.tag_id = t.id
+        where at.article_id = #{articleId}
+        order by t.sort_order, t.id
+    </select>
+
+    <select id="selectQuestions" resultType="com.codechronicles.core.domain.Question">
+        select id, title, description, answer_count, updated_at
+        from question
+        order by updated_at desc, id desc
+        limit 10
+    </select>
+
+    <select id="selectQuestionTags" resultType="string">
+        select t.name
+        from tag t
+        inner join question_tag qt on qt.tag_id = t.id
+        where qt.question_id = #{questionId}
+        order by t.sort_order, t.id
+    </select>
+</mapper>
