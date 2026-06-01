@@ -1,6 +1,6 @@
 # CodeChronicles Core
 
-Java 21 + Spring Boot + MyBatis + Maven 的个人技术博客后端。
+个人博客后端代码，基于 Java 21 + Spring Boot + MyBatis + Maven。
 
 ## 本地运行
 
