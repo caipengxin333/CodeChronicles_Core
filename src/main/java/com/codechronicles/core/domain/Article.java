@@ -2,6 +2,9 @@ package com.codechronicles.core.domain;
 
 import java.time.LocalDate;
 
+/**
+ * 文章实体，对应 article 表。
+ */
 public class Article {
 
     private Long id;
@@ -10,6 +13,7 @@ public class Article {
     private String cover;
     private String category;
     private String content;
+    private String status;
     private LocalDate publishedAt;
     private LocalDate updatedAt;
     private Integer views;
@@ -62,6 +66,14 @@ public class Article {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     public LocalDate getPublishedAt() {

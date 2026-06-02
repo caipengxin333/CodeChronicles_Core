@@ -2,6 +2,9 @@ package com.codechronicles.core.domain;
 
 import java.time.LocalDate;
 
+/**
+ * 问答实体，对应 question 表。
+ */
 public class Question {
 
     private Long id;

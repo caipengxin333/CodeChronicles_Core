@@ -2,6 +2,9 @@ package com.codechronicles.core.dto;
 
 import java.util.List;
 
+/**
+ * 个人资料响应，包含基础信息、统计数据、技能和外部链接。
+ */
 public record ProfileResponse(
         String nickname,
         String name,

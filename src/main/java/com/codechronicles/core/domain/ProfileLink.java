@@ -1,5 +1,8 @@
 package com.codechronicles.core.domain;
 
+/**
+ * 个人资料外部链接实体，对应 profile_link 表。
+ */
 public class ProfileLink {
 
     private Long id;

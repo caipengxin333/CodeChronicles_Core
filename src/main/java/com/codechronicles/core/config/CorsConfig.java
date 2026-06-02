@@ -12,8 +12,14 @@ import org.springframework.web.filter.CorsFilter;
 @ConfigurationProperties(prefix = "blog.cors")
 public class CorsConfig {
 
+    /**
+     * 允许访问后端 API 的前端地址，在 application.yml 的 blog.cors.allowed-origins 中配置。
+     */
     private List<String> allowedOrigins = List.of();
 
+    /**
+     * 只对 /api/** 开放跨域，避免 H2 控制台等非业务路径被一起暴露。
+     */
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();

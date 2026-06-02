@@ -3,13 +3,16 @@ package com.codechronicles.core.controller;
 import com.codechronicles.core.common.ApiResponse;
 import com.codechronicles.core.domain.Tag;
 import com.codechronicles.core.dto.ArticleResponse;
+import com.codechronicles.core.dto.CreateArticleRequest;
 import com.codechronicles.core.dto.PageResponse;
 import com.codechronicles.core.dto.ProfileResponse;
 import com.codechronicles.core.dto.QuestionResponse;
 import com.codechronicles.core.service.BlogService;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,16 +27,25 @@ public class BlogController {
         this.blogService = blogService;
     }
 
+    /**
+     * 获取首页/侧边栏展示的个人资料、统计数据、技能和外部链接。
+     */
     @GetMapping("/profile")
     public ApiResponse<ProfileResponse> getProfile() {
         return ApiResponse.success(blogService.getProfile());
     }
 
+    /**
+     * 获取标签列表，包含每个标签下已发布文章数量。
+     */
     @GetMapping("/tags")
     public ApiResponse<List<Tag>> getTags() {
         return ApiResponse.success(blogService.getTags());
     }
 
+    /**
+     * 分页查询已发布文章，可按 tagId 筛选。
+     */
     @GetMapping("/articles")
     public ApiResponse<PageResponse<ArticleResponse>> getArticles(
             @RequestParam(defaultValue = "1") int page,
@@ -43,11 +55,25 @@ public class BlogController {
         return ApiResponse.success(blogService.getArticles(page, pageSize, tagId));
     }
 
+    /**
+     * 查询单篇文章详情，不存在时由全局异常处理器返回 404。
+     */
     @GetMapping("/articles/{id}")
     public ApiResponse<ArticleResponse> getArticleDetail(@PathVariable Long id) {
         return ApiResponse.success(blogService.getArticleDetail(id));
     }
 
+    /**
+     * 新增文章，发布时间、统计字段和临时自动标签由后端生成。
+     */
+    @PostMapping("/articles")
+    public ApiResponse<ArticleResponse> createArticle(@RequestBody CreateArticleRequest request) {
+        return ApiResponse.success(blogService.createArticle(request));
+    }
+
+    /**
+     * 获取问答列表，用于前端问答模块展示。
+     */
     @GetMapping("/questions")
     public ApiResponse<List<QuestionResponse>> getQuestions() {
         return ApiResponse.success(blogService.getQuestions());

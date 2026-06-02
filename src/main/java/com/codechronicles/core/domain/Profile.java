@@ -1,5 +1,8 @@
 package com.codechronicles.core.domain;
 
+/**
+ * 个人资料实体，对应 profile 表。
+ */
 public class Profile {
 
     private Long id;

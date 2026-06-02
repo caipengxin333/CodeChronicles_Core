@@ -7,7 +7,7 @@
 - 服务端口：`8080`
 - 基础路径：`/api`
 - 本地基础地址：`http://localhost:8080/api`
-- 当前接口方法：全部为 `GET`
+- 当前接口方法：`GET`、`POST`
 - 响应格式：统一使用 `ApiResponse<T>`
 
 ## 统一响应结构
@@ -34,6 +34,18 @@
 
 当前已处理的异常：
 
+校验失败：
+
+```json
+{
+  "code": 400,
+  "message": "文章标题不能为空",
+  "data": null
+}
+```
+
+查询资源不存在：
+
 ```json
 {
   "code": 404,
@@ -44,8 +56,9 @@
 
 说明：
 
+- 新增文章时必填字段缺失或字段格式不合法，HTTP 状态码为 `400`
 - 查询不存在的文章详情时，HTTP 状态码为 `404`
-- 响应体中的 `code` 为 `404`
+- 响应体中的 `code` 与 HTTP 状态码一致
 
 ## 接口列表
 
@@ -54,6 +67,7 @@
 | `/api/profile` | GET | 获取个人资料 |
 | `/api/tags` | GET | 获取标签列表 |
 | `/api/articles` | GET | 获取文章分页列表 |
+| `/api/articles` | POST | 新增文章 |
 | `/api/articles/{id}` | GET | 获取文章详情 |
 | `/api/questions` | GET | 获取问答列表 |
 
@@ -249,7 +263,88 @@ GET /api/articles?page=1&pageSize=10&tagId=2
 | likes | number | 点赞数 |
 | comments | number | 评论数 |
 
-## 4. 获取文章详情
+## 4. 新增文章
+
+### 请求
+
+```http
+POST /api/articles
+Content-Type: application/json
+```
+
+### 请求体
+
+```json
+{
+  "title": "Spring Boot 新增文章接口实践",
+  "summary": "记录文章发布接口的参数校验、默认字段生成和 MyBatis 入库流程。",
+  "cover": "https://example.com/cover.jpg",
+  "category": "后端开发",
+  "content": "这里是文章正文内容。",
+  "tagIds": [1, 2],
+  "tagNames": ["Spring Boot", "MyBatis"]
+}
+```
+
+### 请求字段说明
+
+| 字段 | 类型 | 是否必填 | 说明 |
+| --- | --- | --- | --- |
+| title | string | 是 | 文章标题，最大 160 字符 |
+| summary | string | 是 | 文章摘要，最大 512 字符 |
+| cover | string | 否 | 封面图片地址，填写时必须为 `http` 或 `https` URL，最大 512 字符 |
+| category | string | 是 | 文章分类，最大 64 字符 |
+| content | string | 是 | 文章正文 |
+| tagIds | number[] | 否 | 已存在标签 ID 列表，用于绑定文章标签 |
+| tagNames | string[] | 否 | 标签名称列表，不存在时后端自动创建并绑定 |
+
+后端自动生成字段：
+
+| 字段 | 默认值或生成规则 |
+| --- | --- |
+| status | `PUBLISHED` |
+| publishedAt | 当前服务日期，格式 `yyyy-MM-dd` |
+| updatedAt | 当前服务日期，格式 `yyyy-MM-dd` |
+| views | `0` |
+| likes | `0` |
+| comments | `0` |
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 6,
+    "title": "Spring Boot 新增文章接口实践",
+    "summary": "记录文章发布接口的参数校验、默认字段生成和 MyBatis 入库流程。",
+    "cover": "https://example.com/cover.jpg",
+    "category": "后端开发",
+    "content": "这里是文章正文内容。",
+    "tags": ["Spring Boot", "MyBatis"],
+    "tagNames": ["Spring Boot", "MyBatis"],
+    "publishedAt": "2026-06-03",
+    "updatedAt": "2026-06-03",
+    "date": "2026-06-03",
+    "views": 0,
+    "likes": 0,
+    "comments": 0
+  }
+}
+```
+
+### 400 响应示例
+
+```json
+{
+  "code": 400,
+  "message": "文章标题不能为空",
+  "data": null
+}
+```
+
+## 5. 获取文章详情
 
 ### 请求
 
@@ -304,7 +399,7 @@ GET /api/articles/1
 }
 ```
 
-## 5. 获取问答列表
+## 6. 获取问答列表
 
 ### 请求
 
@@ -420,6 +515,16 @@ export interface ArticleResponse {
   comments: number;
 }
 
+export interface CreateArticleRequest {
+  title: string;
+  summary: string;
+  cover?: string | null;
+  category: string;
+  content: string;
+  tagIds?: number[];
+  tagNames?: string[];
+}
+
 export interface QuestionResponse {
   id: number;
   title: string;
@@ -449,6 +554,9 @@ export const getArticles = (params?: {
 export const getArticleDetail = (id: number) =>
   request.get<ApiResponse<ArticleResponse>>(`/articles/${id}`);
 
+export const createArticle = (data: CreateArticleRequest) =>
+  request.post<ApiResponse<ArticleResponse>>("/articles", data);
+
 export const getQuestions = () =>
   request.get<ApiResponse<QuestionResponse[]>>("/questions");
 ```
@@ -459,4 +567,3 @@ export const getQuestions = () =>
 
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
-

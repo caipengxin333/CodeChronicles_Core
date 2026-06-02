@@ -1,5 +1,8 @@
 package com.codechronicles.core.domain;
 
+/**
+ * 标签实体，对应 tag 表；articleCount 是查询列表时额外统计出的文章数量。
+ */
 public class Tag {
 
     private Long id;

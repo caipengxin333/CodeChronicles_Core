@@ -97,6 +97,57 @@
         order by t.sort_order, t.id
     </select>
 
+    <insert id="insertArticle" parameterType="com.codechronicles.core.domain.Article"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into article (
+            title,
+            summary,
+            cover,
+            category,
+            content,
+            status,
+            published_at,
+            updated_at,
+            views,
+            likes,
+            comments
+        ) values (
+            #{title},
+            #{summary},
+            #{cover},
+            #{category},
+            #{content},
+            #{status},
+            #{publishedAt},
+            #{updatedAt},
+            #{views},
+            #{likes},
+            #{comments}
+        )
+    </insert>
+
+    <select id="selectTagIdByName" resultType="long">
+        select id
+        from tag
+        where name = #{name}
+        limit 1
+    </select>
+
+    <insert id="insertTag">
+        insert into tag (name, sort_order)
+        values (#{name}, #{sortOrder})
+    </insert>
+
+    <select id="selectMaxTagSortOrder" resultType="int">
+        select max(sort_order)
+        from tag
+    </select>
+
+    <insert id="insertArticleTag">
+        insert into article_tag (article_id, tag_id)
+        values (#{articleId}, #{tagId})
+    </insert>
+
     <select id="selectQuestions" resultType="com.codechronicles.core.domain.Question">
         select id, title, description, answer_count, updated_at
         from question
