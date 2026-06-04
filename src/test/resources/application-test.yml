@@ -12,3 +12,20 @@ spring:
   h2:
     console:
       enabled: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+server:
+  servlet:
+    session:
+      timeout: 2m
+
+blog:
+  jwt:
+    secret: codechronicles-test-jwt-secret-please-change-32bytes
+    expiration-ms: 7200000
+  redis:
+    key-prefix: cc:test
+    captcha-expiration: 2m

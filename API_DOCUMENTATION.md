@@ -7,7 +7,7 @@
 - 服务端口：`8080`
 - 基础路径：`/api`
 - 本地基础地址：`http://localhost:8080/api`
-- 当前接口方法：`GET`、`POST`
+- 当前接口方法：`GET`、`POST`、`PUT`、`DELETE`
 - 响应格式：统一使用 `ApiResponse<T>`
 
 ## 统一响应结构
@@ -64,14 +64,125 @@
 
 | 接口 | 方法 | 说明 |
 | --- | --- | --- |
+| `/api/captcha` | GET | 获取图形验证码 |
+| `/api/login` | POST | 后台登录 |
 | `/api/profile` | GET | 获取个人资料 |
 | `/api/tags` | GET | 获取标签列表 |
 | `/api/articles` | GET | 获取文章分页列表 |
-| `/api/articles` | POST | 新增文章 |
+| `/api/articles` | POST | 新增文章，默认提交审核 |
+| `/api/articles/drafts` | POST | 保存草稿 |
 | `/api/articles/{id}` | GET | 获取文章详情 |
+| `/api/articles/{id}` | PUT | 修改文章 |
+| `/api/articles/{id}` | DELETE | 删除文章，当前为软删除 |
+| `/api/articles/{id}/submit` | POST | 草稿提交审核 |
+| `/api/my/articles` | GET | 获取我的文章列表 |
+| `/api/admin/articles` | GET | 管理员获取全部文章列表 |
+| `/api/admin/articles/{id}/review` | POST | 管理员审核文章 |
 | `/api/questions` | GET | 获取问答列表 |
 
-## 1. 获取个人资料
+## 1. 获取图形验证码
+
+### 请求
+
+```http
+GET /api/captcha
+```
+
+### 请求参数
+
+无。
+
+### 功能说明
+
+- 后端生成 4 位字母图形验证码。
+- 验证码文本存入 Redis，key 格式为 `cc:captcha:{captchaKey}`。
+- Redis 验证码过期时间为 2 分钟。
+- 接口返回 `captchaKey` 和 base64 图片，前端登录时需要把 `captchaKey` 和用户输入的 `captcha` 一起提交。
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "msg": "success",
+  "data": {
+    "captchaKey": "31b61b45-51f7-4938-a32c-4ea4ed8e9b42",
+    "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ..."
+  }
+}
+```
+
+### data 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| captchaKey | string | 验证码唯一标识，登录时原样传回 |
+| image | string | base64 图片 data URL，可直接赋给 `img.src` |
+
+## 2. 后台登录
+
+### 请求
+
+```http
+POST /api/login
+Content-Type: application/json
+```
+
+### 请求体
+
+```json
+{
+  "phone": "13800138000",
+  "password": "Aa123456",
+  "captchaKey": "31b61b45-51f7-4938-a32c-4ea4ed8e9b42",
+  "captcha": "abcd"
+}
+```
+
+### 请求字段说明
+
+| 字段 | 类型 | 是否必填 | 说明 |
+| --- | --- | --- | --- |
+| phone | string | 是 | 手机号，必须为 11 位数字 |
+| password | string | 是 | 用户输入的原始密码，必须包含大写字母、小写字母和数字 |
+| captchaKey | string | 是 | `/api/captcha` 返回的验证码标识 |
+| captcha | string | 是 | 用户输入的验证码文本，后端忽略大小写比较 |
+
+### 功能说明
+
+- 后端从 Redis 读取 `cc:captcha:{captchaKey}`。
+- 验证码不存在时返回 `验证码已过期`。
+- 验证码比较时会把前端输入和 Redis 中的验证码都转成大写，因此忽略大小写。
+- 验证码校验后会删除 Redis 中的验证码，避免重复使用。
+- 密码使用 `BCryptPasswordEncoder.matches(原始密码, 数据库 BCrypt 密文)` 校验。
+- 登录成功后生成 JWT，并把用户上下文写入 Redis，key 格式为 `cc:login:token:{token}`，过期时间与 JWT 一致，当前为 2 小时。
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "登录成功",
+  "msg": "登录成功",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9..."
+  }
+}
+```
+
+### 400 响应示例
+
+```json
+{
+  "code": 400,
+  "message": "验证码错误",
+  "msg": "验证码错误",
+  "data": null
+}
+```
+
+## 3. 获取个人资料
 
 ### 请求
 
@@ -143,7 +254,7 @@ GET /api/profile
 | label | string | 链接名称 |
 | url | string | 链接地址 |
 
-## 2. 获取标签列表
+## 4. 获取标签列表
 
 ### 请求
 
@@ -184,7 +295,7 @@ GET /api/tags
 | name | string | 标签名称 |
 | articleCount | number | 该标签下的文章数量 |
 
-## 3. 获取文章分页列表
+## 5. 获取文章分页列表
 
 ### 请求
 
@@ -254,6 +365,11 @@ GET /api/articles?page=1&pageSize=10&tagId=2
 | cover | string | 封面图片地址 |
 | category | string | 分类 |
 | content | string | 文章内容 |
+| status | string | 文章状态：`DRAFT` 草稿，`PENDING_REVIEW` 待审核，`PUBLISHED` 已发布，`REJECTED` 已拒绝 |
+| authorUserId | number | 作者用户 ID |
+| reviewTime | string/null | 审核时间 |
+| reviewerUserId | number/null | 审核人用户 ID |
+| rejectReason | string/null | 审核拒绝原因 |
 | tags | string[] | 标签名称列表 |
 | tagNames | string[] | 标签名称列表，当前与 `tags` 相同 |
 | publishedAt | string | 发布时间，格式 `yyyy-MM-dd` |
@@ -263,13 +379,14 @@ GET /api/articles?page=1&pageSize=10&tagId=2
 | likes | number | 点赞数 |
 | comments | number | 评论数 |
 
-## 4. 新增文章
+## 6. 新增文章，提交审核
 
 ### 请求
 
 ```http
 POST /api/articles
 Content-Type: application/json
+Authorization: Bearer {token}
 ```
 
 ### 请求体
@@ -302,12 +419,19 @@ Content-Type: application/json
 
 | 字段 | 默认值或生成规则 |
 | --- | --- |
-| status | `PUBLISHED` |
+| authorUserId | 当前登录用户 ID |
+| status | `PENDING_REVIEW` |
 | publishedAt | 当前服务日期，格式 `yyyy-MM-dd` |
 | updatedAt | 当前服务日期，格式 `yyyy-MM-dd` |
 | views | `0` |
 | likes | `0` |
 | comments | `0` |
+
+权限说明：
+
+- 必须登录。
+- 普通用户新增文章后默认进入待审核，公开列表暂不展示。
+- 管理员新增文章当前也按统一流程进入待审核。
 
 ### 响应示例
 
@@ -322,6 +446,11 @@ Content-Type: application/json
     "cover": "https://example.com/cover.jpg",
     "category": "后端开发",
     "content": "这里是文章正文内容。",
+    "status": "PENDING_REVIEW",
+    "authorUserId": 1,
+    "reviewTime": null,
+    "reviewerUserId": null,
+    "rejectReason": null,
     "tags": ["Spring Boot", "MyBatis"],
     "tagNames": ["Spring Boot", "MyBatis"],
     "publishedAt": "2026-06-03",
@@ -344,7 +473,200 @@ Content-Type: application/json
 }
 ```
 
-## 5. 获取文章详情
+## 7. 保存草稿
+
+### 请求
+
+```http
+POST /api/articles/drafts
+Content-Type: application/json
+Authorization: Bearer {token}
+```
+
+### 请求体
+
+与 `POST /api/articles` 相同。
+
+### 功能说明
+
+- 必须登录。
+- 后端自动写入 `authorUserId = 当前登录用户 ID`。
+- 文章状态为 `DRAFT`。
+- 草稿不会出现在公开文章列表。
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "msg": "success",
+  "data": {
+    "id": 7,
+    "title": "草稿标题",
+    "status": "DRAFT",
+    "authorUserId": 1,
+    "rejectReason": null
+  }
+}
+```
+
+## 8. 修改文章
+
+### 请求
+
+```http
+PUT /api/articles/{id}
+Content-Type: application/json
+Authorization: Bearer {token}
+```
+
+### 权限说明
+
+- `USER` 只能修改自己的文章。
+- `ADMIN` 可以修改所有文章。
+- 修改成功后状态统一变成 `PENDING_REVIEW`，并清空历史审核信息，避免已发布文章被修改后绕过审核。
+
+### 请求体
+
+与 `POST /api/articles` 相同。
+
+## 9. 删除文章
+
+### 请求
+
+```http
+DELETE /api/articles/{id}
+Authorization: Bearer {token}
+```
+
+### 权限说明
+
+- `USER` 只能删除自己的文章。
+- `ADMIN` 可以删除所有文章。
+- 当前实现是软删除：写入 `deleted = 1`、`deletedAt`、`deletedBy`，公开列表和我的文章列表默认不展示已删除文章。
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "删除成功",
+  "msg": "删除成功",
+  "data": null
+}
+```
+
+## 10. 草稿提交审核
+
+### 请求
+
+```http
+POST /api/articles/{id}/submit
+Authorization: Bearer {token}
+```
+
+### 功能说明
+
+- `USER` 只能提交自己的文章。
+- `ADMIN` 可以提交所有文章。
+- 后端把文章状态更新为 `PENDING_REVIEW`，并清空 `reviewTime`、`reviewerUserId`、`rejectReason`。
+
+## 11. 我的文章列表
+
+### 请求
+
+```http
+GET /api/my/articles?page=1&pageSize=10&status=DRAFT
+Authorization: Bearer {token}
+```
+
+### 请求参数
+
+| 参数 | 类型 | 是否必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| page | number | 否 | 1 | 页码 |
+| pageSize | number | 否 | 10 | 每页数量，最大 50 |
+| status | string | 否 | 无 | 可选：`DRAFT`、`PENDING_REVIEW`、`PUBLISHED`、`REJECTED` |
+
+### 功能说明
+
+- 必须登录。
+- 只返回当前登录用户自己的文章。
+- 不传 `status` 时返回自己的全部状态文章，已软删除文章不返回。
+
+## 12. 管理员文章列表
+
+### 请求
+
+```http
+GET /api/admin/articles?page=1&pageSize=10&status=PENDING_REVIEW
+Authorization: Bearer {token}
+```
+
+### 功能说明
+
+- 必须登录且当前用户 `role = ADMIN`。
+- 可查看所有未软删除文章。
+- `status` 参数规则与 `/api/my/articles` 相同。
+
+## 13. 管理员审核文章
+
+### 请求
+
+```http
+POST /api/admin/articles/{id}/review
+Content-Type: application/json
+Authorization: Bearer {token}
+```
+
+### 请求体
+
+审核通过：
+
+```json
+{
+  "approved": true,
+  "rejectReason": ""
+}
+```
+
+审核拒绝：
+
+```json
+{
+  "approved": false,
+  "rejectReason": "内容不完整，请补充实践步骤"
+}
+```
+
+### 功能说明
+
+- 必须登录且当前用户 `role = ADMIN`。
+- 审核通过后文章状态变成 `PUBLISHED`，公开文章列表可见。
+- 审核拒绝后文章状态变成 `REJECTED`，并保存 `rejectReason`。
+- 每次审核都会插入 `article_review_record` 审核记录。
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "msg": "success",
+  "data": {
+    "id": 6,
+    "status": "PUBLISHED",
+    "authorUserId": 1,
+    "reviewerUserId": 2,
+    "rejectReason": null
+  }
+}
+```
+
+## 14. 获取文章详情
+
+公开文章详情只返回 `PUBLISHED` 且未软删除的文章。
 
 ### 请求
 
@@ -399,7 +721,7 @@ GET /api/articles/1
 }
 ```
 
-## 6. 获取问答列表
+## 15. 获取问答列表
 
 ### 请求
 
@@ -462,7 +784,24 @@ export const request = axios.create({
 export interface ApiResponse<T> {
   code: number;
   message: string;
+  msg: string;
   data: T;
+}
+
+export interface CaptchaResponse {
+  captchaKey: string;
+  image: string;
+}
+
+export interface LoginRequest {
+  phone: string;
+  password: string;
+  captchaKey: string;
+  captcha: string;
+}
+
+export interface LoginResponse {
+  token: string;
 }
 
 export interface LinkResponse {
@@ -505,6 +844,11 @@ export interface ArticleResponse {
   cover: string;
   category: string;
   content: string;
+  status: "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "REJECTED";
+  authorUserId: number;
+  reviewTime: string | null;
+  reviewerUserId: number | null;
+  rejectReason: string | null;
   tags: string[];
   tagNames: string[];
   publishedAt: string;
@@ -525,6 +869,11 @@ export interface CreateArticleRequest {
   tagNames?: string[];
 }
 
+export interface ReviewArticleRequest {
+  approved: boolean;
+  rejectReason?: string;
+}
+
 export interface QuestionResponse {
   id: number;
   title: string;
@@ -542,6 +891,12 @@ export interface QuestionResponse {
 export const getProfile = () =>
   request.get<ApiResponse<ProfileResponse>>("/profile");
 
+export const getCaptcha = () =>
+  request.get<ApiResponse<CaptchaResponse>>("/captcha");
+
+export const login = (data: LoginRequest) =>
+  request.post<ApiResponse<LoginResponse>>("/login", data);
+
 export const getTags = () =>
   request.get<ApiResponse<TagResponse[]>>("/tags");
 
@@ -556,6 +911,33 @@ export const getArticleDetail = (id: number) =>
 
 export const createArticle = (data: CreateArticleRequest) =>
   request.post<ApiResponse<ArticleResponse>>("/articles", data);
+
+export const createArticleDraft = (data: CreateArticleRequest) =>
+  request.post<ApiResponse<ArticleResponse>>("/articles/drafts", data);
+
+export const updateArticle = (id: number, data: CreateArticleRequest) =>
+  request.put<ApiResponse<ArticleResponse>>(`/articles/${id}`, data);
+
+export const deleteArticle = (id: number) =>
+  request.delete<ApiResponse<null>>(`/articles/${id}`);
+
+export const submitArticle = (id: number) =>
+  request.post<ApiResponse<ArticleResponse>>(`/articles/${id}/submit`);
+
+export const getMyArticles = (params?: {
+  page?: number;
+  pageSize?: number;
+  status?: ArticleResponse["status"];
+}) => request.get<ApiResponse<PageResponse<ArticleResponse>>>("/my/articles", { params });
+
+export const getAdminArticles = (params?: {
+  page?: number;
+  pageSize?: number;
+  status?: ArticleResponse["status"];
+}) => request.get<ApiResponse<PageResponse<ArticleResponse>>>("/admin/articles", { params });
+
+export const reviewArticle = (id: number, data: ReviewArticleRequest) =>
+  request.post<ApiResponse<ArticleResponse>>(`/admin/articles/${id}/review`, data);
 
 export const getQuestions = () =>
   request.get<ApiResponse<QuestionResponse[]>>("/questions");

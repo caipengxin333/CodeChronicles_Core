@@ -5,6 +5,7 @@ import com.codechronicles.core.domain.Profile;
 import com.codechronicles.core.domain.ProfileLink;
 import com.codechronicles.core.domain.Question;
 import com.codechronicles.core.domain.Tag;
+import com.codechronicles.core.domain.User;
 import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
@@ -17,6 +18,11 @@ public interface BlogMapper {
      * 查询站点唯一的个人资料。
      */
     Profile selectProfile();
+
+    /**
+     * 根据当前登录用户绑定的 profileId 查询个人资料。
+     */
+    Profile selectProfileById(@Param("profileId") Long profileId);
 
     /**
      * 查询个人技能，按配置的排序字段返回。
@@ -34,9 +40,49 @@ public interface BlogMapper {
     List<Tag> selectTags();
 
     /**
+     * 根据手机号查询后台登录用户。
+     */
+    User selectUserByPhone(@Param("phone") String phone);
+
+    /**
+     * 注册时新增个人资料，写入后回填 profile.id。
+     */
+    int insertProfile(Profile profile);
+
+    /**
+     * 注册时新增后台登录用户，写入后回填 user.id。
+     */
+    int insertUser(User user);
+
+    /**
+     * 注册时保存个人技能。
+     */
+    int insertProfileSkill(
+            @Param("profileId") Long profileId,
+            @Param("skill") String skill,
+            @Param("sortOrder") int sortOrder
+    );
+
+    /**
+     * 注册时保存个人外部链接。
+     */
+    int insertProfileLink(
+            @Param("profileId") Long profileId,
+            @Param("label") String label,
+            @Param("url") String url,
+            @Param("sortOrder") int sortOrder
+    );
+
+    List<String> selectUserRoles(@Param("userId") Long userId);
+
+    /**
      * 统计已发布文章数量；传入 tagId 时只统计该标签下的文章。
      */
     long countArticles(@Param("tagId") Long tagId);
+
+    long countMyArticles(@Param("authorUserId") Long authorUserId, @Param("status") String status);
+
+    long countAdminArticles(@Param("status") String status);
 
     int countTags();
 
@@ -51,7 +97,22 @@ public interface BlogMapper {
             @Param("offset") int offset
     );
 
+    List<Article> selectMyArticles(
+            @Param("authorUserId") Long authorUserId,
+            @Param("status") String status,
+            @Param("limit") int limit,
+            @Param("offset") int offset
+    );
+
+    List<Article> selectAdminArticles(
+            @Param("status") String status,
+            @Param("limit") int limit,
+            @Param("offset") int offset
+    );
+
     Article selectArticleById(@Param("id") Long id);
+
+    Article selectArticleForManage(@Param("id") Long id);
 
     /**
      * 查询文章关联的标签名称，用于组装文章列表和详情响应。
@@ -62,6 +123,10 @@ public interface BlogMapper {
      * 新增文章，写入后通过自增主键回填 article.id。
      */
     int insertArticle(Article article);
+
+    int updateArticle(Article article);
+
+    int deleteArticleTags(@Param("articleId") Long articleId);
 
     Long selectTagIdByName(@Param("name") String name);
 
@@ -76,6 +141,37 @@ public interface BlogMapper {
      * 建立文章与标签的多对多关联。
      */
     int insertArticleTag(@Param("articleId") Long articleId, @Param("tagId") Long tagId);
+
+    int updateArticleStatusForSubmit(
+            @Param("id") Long id,
+            @Param("updatedAt") java.time.LocalDate updatedAt
+    );
+
+    int reviewArticle(
+            @Param("id") Long id,
+            @Param("status") String status,
+            @Param("reviewerUserId") Long reviewerUserId,
+            @Param("reviewTime") java.time.LocalDateTime reviewTime,
+            @Param("rejectReason") String rejectReason,
+            @Param("updatedAt") java.time.LocalDate updatedAt
+    );
+
+    int insertArticleReviewRecord(
+            @Param("articleId") Long articleId,
+            @Param("reviewerUserId") Long reviewerUserId,
+            @Param("beforeStatus") String beforeStatus,
+            @Param("afterStatus") String afterStatus,
+            @Param("approved") boolean approved,
+            @Param("rejectReason") String rejectReason,
+            @Param("reviewTime") java.time.LocalDateTime reviewTime
+    );
+
+    int softDeleteArticle(
+            @Param("id") Long id,
+            @Param("deletedAt") java.time.LocalDateTime deletedAt,
+            @Param("deletedBy") Long deletedBy,
+            @Param("updatedAt") java.time.LocalDate updatedAt
+    );
 
     List<Question> selectQuestions();
 

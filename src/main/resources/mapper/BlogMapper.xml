@@ -11,6 +11,13 @@
         limit 1
     </select>
 
+    <select id="selectProfileById" resultType="com.codechronicles.core.domain.Profile">
+        select id, nickname, account, avatar, bio, role, location, followers
+        from profile
+        where id = #{profileId}
+        limit 1
+    </select>
+
     <select id="selectProfileSkills" resultType="string">
         select skill
         from profile_skill
@@ -32,9 +39,69 @@
             count(a.id) as article_count
         from tag t
         left join article_tag at on at.tag_id = t.id
-        left join article a on a.id = at.article_id and a.status = 'PUBLISHED'
+        left join article a on a.id = at.article_id and a.status = 'PUBLISHED' and a.deleted = 0
         group by t.id, t.name, t.sort_order
         order by t.sort_order, t.id
+    </select>
+
+    <select id="selectUserByPhone" resultType="com.codechronicles.core.domain.User">
+        select id, phone, password, create_time, profile_id, role
+        from `user`
+        where phone = #{phone}
+        limit 1
+    </select>
+
+    <insert id="insertProfile" parameterType="com.codechronicles.core.domain.Profile"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into profile (
+            nickname,
+            account,
+            avatar,
+            bio,
+            role,
+            location,
+            followers
+        ) values (
+            #{nickname},
+            #{account},
+            #{avatar},
+            #{bio},
+            #{role},
+            #{location},
+            #{followers}
+        )
+    </insert>
+
+    <insert id="insertUser" parameterType="com.codechronicles.core.domain.User"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into `user` (
+            phone,
+            password,
+            profile_id,
+            role
+        ) values (
+            #{phone},
+            #{password},
+            #{profileId},
+            #{role}
+        )
+    </insert>
+
+    <insert id="insertProfileSkill">
+        insert into profile_skill (profile_id, skill, sort_order)
+        values (#{profileId}, #{skill}, #{sortOrder})
+    </insert>
+
+    <insert id="insertProfileLink">
+        insert into profile_link (profile_id, label, url, sort_order)
+        values (#{profileId}, #{label}, #{url}, #{sortOrder})
+    </insert>
+
+    <select id="selectUserRoles" resultType="string">
+        select role
+        from `user`
+        where id = #{userId}
+        limit 1
     </select>
 
     <select id="countArticles" resultType="long">
@@ -44,8 +111,28 @@
             inner join article_tag at on at.article_id = a.id
         </if>
         where a.status = 'PUBLISHED'
+          and a.deleted = 0
         <if test="tagId != null">
             and at.tag_id = #{tagId}
+        </if>
+    </select>
+
+    <select id="countMyArticles" resultType="long">
+        select count(*)
+        from article
+        where author_user_id = #{authorUserId}
+          and deleted = 0
+        <if test="status != null and status != ''">
+            and status = #{status}
+        </if>
+    </select>
+
+    <select id="countAdminArticles" resultType="long">
+        select count(*)
+        from article
+        where deleted = 0
+        <if test="status != null and status != ''">
+            and status = #{status}
         </if>
     </select>
 
@@ -65,6 +152,14 @@
             a.cover,
             a.category,
             a.content,
+            a.status,
+            a.author_user_id,
+            a.review_time,
+            a.reviewer_user_id,
+            a.reject_reason,
+            a.deleted,
+            a.deleted_at,
+            a.deleted_by,
             a.published_at,
             a.updated_at,
             a.views,
@@ -75,6 +170,7 @@
             inner join article_tag at on at.article_id = a.id
         </if>
         where a.status = 'PUBLISHED'
+          and a.deleted = 0
         <if test="tagId != null">
             and at.tag_id = #{tagId}
         </if>
@@ -82,11 +178,84 @@
         limit #{limit} offset #{offset}
     </select>
 
+    <select id="selectMyArticles" resultType="com.codechronicles.core.domain.Article">
+        select
+            id,
+            title,
+            summary,
+            cover,
+            category,
+            content,
+            status,
+            author_user_id,
+            review_time,
+            reviewer_user_id,
+            reject_reason,
+            deleted,
+            deleted_at,
+            deleted_by,
+            published_at,
+            updated_at,
+            views,
+            likes,
+            comments
+        from article
+        where author_user_id = #{authorUserId}
+          and deleted = 0
+        <if test="status != null and status != ''">
+            and status = #{status}
+        </if>
+        order by updated_at desc, id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="selectAdminArticles" resultType="com.codechronicles.core.domain.Article">
+        select
+            id,
+            title,
+            summary,
+            cover,
+            category,
+            content,
+            status,
+            author_user_id,
+            review_time,
+            reviewer_user_id,
+            reject_reason,
+            deleted,
+            deleted_at,
+            deleted_by,
+            published_at,
+            updated_at,
+            views,
+            likes,
+            comments
+        from article
+        where deleted = 0
+        <if test="status != null and status != ''">
+            and status = #{status}
+        </if>
+        order by updated_at desc, id desc
+        limit #{limit} offset #{offset}
+    </select>
+
     <select id="selectArticleById" resultType="com.codechronicles.core.domain.Article">
-        select id, title, summary, cover, category, content, published_at, updated_at, views, likes, comments
+        select id, title, summary, cover, category, content, status, author_user_id, review_time,
+               reviewer_user_id, reject_reason, deleted, deleted_at, deleted_by,
+               published_at, updated_at, views, likes, comments
         from article
         where id = #{id}
           and status = 'PUBLISHED'
+          and deleted = 0
+    </select>
+
+    <select id="selectArticleForManage" resultType="com.codechronicles.core.domain.Article">
+        select id, title, summary, cover, category, content, status, author_user_id, review_time,
+               reviewer_user_id, reject_reason, deleted, deleted_at, deleted_by,
+               published_at, updated_at, views, likes, comments
+        from article
+        where id = #{id}
+          and deleted = 0
     </select>
 
     <select id="selectArticleTags" resultType="string">
@@ -106,6 +275,13 @@
             category,
             content,
             status,
+            author_user_id,
+            review_time,
+            reviewer_user_id,
+            reject_reason,
+            deleted,
+            deleted_at,
+            deleted_by,
             published_at,
             updated_at,
             views,
@@ -118,6 +294,13 @@
             #{category},
             #{content},
             #{status},
+            #{authorUserId},
+            #{reviewTime},
+            #{reviewerUserId},
+            #{rejectReason},
+            #{deleted},
+            #{deletedAt},
+            #{deletedBy},
             #{publishedAt},
             #{updatedAt},
             #{views},
@@ -125,6 +308,26 @@
             #{comments}
         )
     </insert>
+
+    <update id="updateArticle" parameterType="com.codechronicles.core.domain.Article">
+        update article
+        set title = #{title},
+            summary = #{summary},
+            cover = #{cover},
+            category = #{category},
+            content = #{content},
+            status = #{status},
+            review_time = #{reviewTime},
+            reviewer_user_id = #{reviewerUserId},
+            reject_reason = #{rejectReason},
+            updated_at = #{updatedAt}
+        where id = #{id}
+    </update>
+
+    <delete id="deleteArticleTags">
+        delete from article_tag
+        where article_id = #{articleId}
+    </delete>
 
     <select id="selectTagIdByName" resultType="long">
         select id
@@ -147,6 +350,58 @@
         insert into article_tag (article_id, tag_id)
         values (#{articleId}, #{tagId})
     </insert>
+
+    <update id="updateArticleStatusForSubmit">
+        update article
+        set status = 'PENDING_REVIEW',
+            updated_at = #{updatedAt},
+            reject_reason = null,
+            review_time = null,
+            reviewer_user_id = null
+        where id = #{id}
+          and deleted = 0
+    </update>
+
+    <update id="reviewArticle">
+        update article
+        set status = #{status},
+            reviewer_user_id = #{reviewerUserId},
+            review_time = #{reviewTime},
+            reject_reason = #{rejectReason},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and deleted = 0
+    </update>
+
+    <insert id="insertArticleReviewRecord">
+        insert into article_review_record (
+            article_id,
+            reviewer_user_id,
+            before_status,
+            after_status,
+            approved,
+            reject_reason,
+            review_time
+        ) values (
+            #{articleId},
+            #{reviewerUserId},
+            #{beforeStatus},
+            #{afterStatus},
+            #{approved},
+            #{rejectReason},
+            #{reviewTime}
+        )
+    </insert>
+
+    <update id="softDeleteArticle">
+        update article
+        set deleted = 1,
+            deleted_at = #{deletedAt},
+            deleted_by = #{deletedBy},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and deleted = 0
+    </update>
 
     <select id="selectQuestions" resultType="com.codechronicles.core.domain.Question">
         select id, title, description, answer_count, updated_at

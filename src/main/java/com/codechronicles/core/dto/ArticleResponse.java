@@ -1,6 +1,7 @@
 package com.codechronicles.core.dto;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -13,6 +14,11 @@ public record ArticleResponse(
         String cover,
         String category,
         String content,
+        String status,
+        Long authorUserId,
+        LocalDateTime reviewTime,
+        Long reviewerUserId,
+        String rejectReason,
         List<String> tags,
         List<String> tagNames,
         LocalDate publishedAt,

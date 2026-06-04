@@ -1,6 +1,7 @@
 package com.codechronicles.core.domain;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * 文章实体，对应 article 表。
@@ -14,6 +15,13 @@ public class Article {
     private String category;
     private String content;
     private String status;
+    private Long authorUserId;
+    private LocalDateTime reviewTime;
+    private Long reviewerUserId;
+    private String rejectReason;
+    private Boolean deleted;
+    private LocalDateTime deletedAt;
+    private Long deletedBy;
     private LocalDate publishedAt;
     private LocalDate updatedAt;
     private Integer views;
@@ -74,6 +82,62 @@ public class Article {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Long getAuthorUserId() {
+        return authorUserId;
+    }
+
+    public void setAuthorUserId(Long authorUserId) {
+        this.authorUserId = authorUserId;
+    }
+
+    public LocalDateTime getReviewTime() {
+        return reviewTime;
+    }
+
+    public void setReviewTime(LocalDateTime reviewTime) {
+        this.reviewTime = reviewTime;
+    }
+
+    public Long getReviewerUserId() {
+        return reviewerUserId;
+    }
+
+    public void setReviewerUserId(Long reviewerUserId) {
+        this.reviewerUserId = reviewerUserId;
+    }
+
+    public String getRejectReason() {
+        return rejectReason;
+    }
+
+    public void setRejectReason(String rejectReason) {
+        this.rejectReason = rejectReason;
+    }
+
+    public Boolean getDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(Boolean deleted) {
+        this.deleted = deleted;
+    }
+
+    public LocalDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(LocalDateTime deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    public Long getDeletedBy() {
+        return deletedBy;
+    }
+
+    public void setDeletedBy(Long deletedBy) {
+        this.deletedBy = deletedBy;
     }
 
     public LocalDate getPublishedAt() {

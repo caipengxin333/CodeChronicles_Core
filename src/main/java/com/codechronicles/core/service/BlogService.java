@@ -5,16 +5,20 @@ import com.codechronicles.core.domain.Profile;
 import com.codechronicles.core.domain.ProfileLink;
 import com.codechronicles.core.domain.Question;
 import com.codechronicles.core.domain.Tag;
+import com.codechronicles.core.common.CurrentUserContext;
 import com.codechronicles.core.dto.ArticleResponse;
 import com.codechronicles.core.dto.CreateArticleRequest;
 import com.codechronicles.core.dto.LinkResponse;
 import com.codechronicles.core.dto.PageResponse;
 import com.codechronicles.core.dto.ProfileResponse;
 import com.codechronicles.core.dto.QuestionResponse;
+import com.codechronicles.core.dto.ReviewArticleRequest;
 import com.codechronicles.core.mapper.BlogMapper;
+import com.codechronicles.core.util.ThreadLocalUtil;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -29,6 +33,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class BlogService {
+
+    private static final String ROLE_ADMIN = "ADMIN";
+    private static final String STATUS_DRAFT = "DRAFT";
+    private static final String STATUS_PENDING_REVIEW = "PENDING_REVIEW";
+    private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String STATUS_REJECTED = "REJECTED";
 
     /**
      * 临时标签提取正则：匹配连续中文词或常见英文技术词。
@@ -102,9 +112,19 @@ public class BlogService {
 
     @Transactional
     public ArticleResponse createArticle(CreateArticleRequest request) {
+        return createArticleWithStatus(request, STATUS_PENDING_REVIEW);
+    }
+
+    @Transactional
+    public ArticleResponse createDraft(CreateArticleRequest request) {
+        return createArticleWithStatus(request, STATUS_DRAFT);
+    }
+
+    private ArticleResponse createArticleWithStatus(CreateArticleRequest request, String status) {
         if (request == null) {
             throw new IllegalArgumentException("文章内容不能为空");
         }
+        CurrentUserContext currentUser = requireCurrentUser();
 
         Article article = new Article();
         // 前端只提交内容相关字段，发布时间和统计字段统一由后端生成，避免前端伪造。
@@ -113,7 +133,9 @@ public class BlogService {
         article.setCover(optionalUrl(request.cover(), "文章封面", 512));
         article.setCategory(requireText(request.category(), "文章分类", 64));
         article.setContent(requireText(request.content(), "文章正文", null));
-        article.setStatus("PUBLISHED");
+        article.setStatus(status);
+        article.setAuthorUserId(currentUser.userId());
+        article.setDeleted(false);
 
         LocalDate today = LocalDate.now();
         article.setPublishedAt(today);
@@ -125,7 +147,103 @@ public class BlogService {
         blogMapper.insertArticle(article);
         bindArticleTags(article.getId(), request);
 
-        return getArticleDetail(article.getId());
+        return toArticleResponse(blogMapper.selectArticleForManage(article.getId()));
+    }
+
+    public PageResponse<ArticleResponse> getMyArticles(int page, int pageSize, String status) {
+        CurrentUserContext currentUser = requireCurrentUser();
+        String normalizedStatus = optionalStatus(status);
+        int currentPage = Math.max(page, 1);
+        int currentPageSize = Math.min(Math.max(pageSize, 1), 50);
+        int offset = (currentPage - 1) * currentPageSize;
+        long total = blogMapper.countMyArticles(currentUser.userId(), normalizedStatus);
+        List<ArticleResponse> list = blogMapper.selectMyArticles(currentUser.userId(), normalizedStatus, currentPageSize, offset)
+                .stream()
+                .map(this::toArticleResponse)
+                .toList();
+        return new PageResponse<>(total, list);
+    }
+
+    public PageResponse<ArticleResponse> getAdminArticles(int page, int pageSize, String status) {
+        requireAdmin();
+        String normalizedStatus = optionalStatus(status);
+        int currentPage = Math.max(page, 1);
+        int currentPageSize = Math.min(Math.max(pageSize, 1), 50);
+        int offset = (currentPage - 1) * currentPageSize;
+        long total = blogMapper.countAdminArticles(normalizedStatus);
+        List<ArticleResponse> list = blogMapper.selectAdminArticles(normalizedStatus, currentPageSize, offset)
+                .stream()
+                .map(this::toArticleResponse)
+                .toList();
+        return new PageResponse<>(total, list);
+    }
+
+    @Transactional
+    public ArticleResponse updateArticle(Long id, CreateArticleRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("文章内容不能为空");
+        }
+        CurrentUserContext currentUser = requireCurrentUser();
+        Article article = getManageArticle(id);
+        ensureArticleOwnerOrAdmin(article, currentUser);
+
+        article.setTitle(requireText(request.title(), "文章标题", 160));
+        article.setSummary(requireText(request.summary(), "文章摘要", 512));
+        article.setCover(optionalUrl(request.cover(), "文章封面", 512));
+        article.setCategory(requireText(request.category(), "文章分类", 64));
+        article.setContent(requireText(request.content(), "文章正文", null));
+        article.setUpdatedAt(LocalDate.now());
+        article.setReviewTime(null);
+        article.setReviewerUserId(null);
+        article.setRejectReason(null);
+        article.setStatus(STATUS_PENDING_REVIEW);
+        blogMapper.updateArticle(article);
+        blogMapper.deleteArticleTags(article.getId());
+        bindArticleTags(article.getId(), request);
+        return toArticleResponse(blogMapper.selectArticleForManage(article.getId()));
+    }
+
+    @Transactional
+    public ArticleResponse submitArticle(Long id) {
+        CurrentUserContext currentUser = requireCurrentUser();
+        Article article = getManageArticle(id);
+        ensureArticleOwnerOrAdmin(article, currentUser);
+        blogMapper.updateArticleStatusForSubmit(id, LocalDate.now());
+        return toArticleResponse(blogMapper.selectArticleForManage(id));
+    }
+
+    @Transactional
+    public ArticleResponse reviewArticle(Long id, ReviewArticleRequest request) {
+        CurrentUserContext currentUser = requireAdmin();
+        if (request == null || request.approved() == null) {
+            throw new IllegalArgumentException("审核结果不能为空");
+        }
+
+        Article article = getManageArticle(id);
+        String beforeStatus = article.getStatus();
+        boolean approved = request.approved();
+        String afterStatus = approved ? STATUS_PUBLISHED : STATUS_REJECTED;
+        String rejectReason = approved ? null : requireText(request.rejectReason(), "拒绝原因", 512);
+        LocalDateTime reviewTime = LocalDateTime.now();
+        blogMapper.reviewArticle(id, afterStatus, currentUser.userId(), reviewTime, rejectReason, LocalDate.now());
+        blogMapper.insertArticleReviewRecord(
+                id,
+                currentUser.userId(),
+                beforeStatus,
+                afterStatus,
+                approved,
+                rejectReason,
+                reviewTime
+        );
+        return toArticleResponse(blogMapper.selectArticleForManage(id));
+    }
+
+    @Transactional
+    public void deleteArticle(Long id) {
+        CurrentUserContext currentUser = requireCurrentUser();
+        Article article = getManageArticle(id);
+        ensureArticleOwnerOrAdmin(article, currentUser);
+        blogMapper.softDeleteArticle(id, LocalDateTime.now(), currentUser.userId(), LocalDate.now());
     }
 
     public List<QuestionResponse> getQuestions() {
@@ -147,6 +265,11 @@ public class BlogService {
                 article.getCover(),
                 article.getCategory(),
                 article.getContent(),
+                article.getStatus(),
+                article.getAuthorUserId(),
+                article.getReviewTime(),
+                article.getReviewerUserId(),
+                article.getRejectReason(),
                 tags,
                 tags,
                 article.getPublishedAt(),
@@ -156,6 +279,50 @@ public class BlogService {
                 article.getLikes(),
                 article.getComments()
         );
+    }
+
+    private Article getManageArticle(Long id) {
+        Article article = blogMapper.selectArticleForManage(id);
+        if (article == null) {
+            throw new NoSuchElementException("Article not found: " + id);
+        }
+        return article;
+    }
+
+    private CurrentUserContext requireCurrentUser() {
+        CurrentUserContext currentUser = ThreadLocalUtil.get();
+        if (currentUser == null) {
+            throw new IllegalArgumentException("登录已过期，请重新登录");
+        }
+        return currentUser;
+    }
+
+    private CurrentUserContext requireAdmin() {
+        CurrentUserContext currentUser = requireCurrentUser();
+        if (!ROLE_ADMIN.equals(currentUser.role())) {
+            throw new IllegalArgumentException("无权限操作");
+        }
+        return currentUser;
+    }
+
+    private void ensureArticleOwnerOrAdmin(Article article, CurrentUserContext currentUser) {
+        if (ROLE_ADMIN.equals(currentUser.role())) {
+            return;
+        }
+        if (!currentUser.userId().equals(article.getAuthorUserId())) {
+            throw new IllegalArgumentException("无权限操作");
+        }
+    }
+
+    private String optionalStatus(String status) {
+        String normalized = optionalText(status, "文章状态", 32);
+        if (normalized == null) {
+            return null;
+        }
+        if (!Set.of(STATUS_DRAFT, STATUS_PENDING_REVIEW, STATUS_PUBLISHED, STATUS_REJECTED).contains(normalized)) {
+            throw new IllegalArgumentException("文章状态不正确");
+        }
+        return normalized;
     }
 
     private QuestionResponse toQuestionResponse(Question question) {

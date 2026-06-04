@@ -7,9 +7,12 @@ import com.codechronicles.core.dto.CreateArticleRequest;
 import com.codechronicles.core.dto.PageResponse;
 import com.codechronicles.core.dto.ProfileResponse;
 import com.codechronicles.core.dto.QuestionResponse;
+import com.codechronicles.core.dto.ReviewArticleRequest;
 import com.codechronicles.core.service.BlogService;
 import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -69,6 +72,56 @@ public class BlogController {
     @PostMapping("/articles")
     public ApiResponse<ArticleResponse> createArticle(@RequestBody CreateArticleRequest request) {
         return ApiResponse.success(blogService.createArticle(request));
+    }
+
+    @PostMapping("/articles/drafts")
+    public ApiResponse<ArticleResponse> createDraft(@RequestBody CreateArticleRequest request) {
+        return ApiResponse.success(blogService.createDraft(request));
+    }
+
+    @PutMapping("/articles/{id}")
+    public ApiResponse<ArticleResponse> updateArticle(
+            @PathVariable Long id,
+            @RequestBody CreateArticleRequest request
+    ) {
+        return ApiResponse.success(blogService.updateArticle(id, request));
+    }
+
+    @DeleteMapping("/articles/{id}")
+    public ApiResponse<Void> deleteArticle(@PathVariable Long id) {
+        blogService.deleteArticle(id);
+        return ApiResponse.success("删除成功", null);
+    }
+
+    @PostMapping("/articles/{id}/submit")
+    public ApiResponse<ArticleResponse> submitArticle(@PathVariable Long id) {
+        return ApiResponse.success(blogService.submitArticle(id));
+    }
+
+    @GetMapping("/my/articles")
+    public ApiResponse<PageResponse<ArticleResponse>> getMyArticles(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String status
+    ) {
+        return ApiResponse.success(blogService.getMyArticles(page, pageSize, status));
+    }
+
+    @GetMapping("/admin/articles")
+    public ApiResponse<PageResponse<ArticleResponse>> getAdminArticles(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String status
+    ) {
+        return ApiResponse.success(blogService.getAdminArticles(page, pageSize, status));
+    }
+
+    @PostMapping("/admin/articles/{id}/review")
+    public ApiResponse<ArticleResponse> reviewArticle(
+            @PathVariable Long id,
+            @RequestBody ReviewArticleRequest request
+    ) {
+        return ApiResponse.success(blogService.reviewArticle(id, request));
     }
 
     /**
