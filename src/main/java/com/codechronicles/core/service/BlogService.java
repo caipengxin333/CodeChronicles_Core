@@ -7,6 +7,7 @@ import com.codechronicles.core.domain.ProfileLink;
 import com.codechronicles.core.domain.Question;
 import com.codechronicles.core.domain.Tag;
 import com.codechronicles.core.common.CurrentUserContext;
+import com.codechronicles.core.config.AiChatClientConfig;
 import com.codechronicles.core.dto.ArticleResponse;
 import com.codechronicles.core.dto.ArticleCommentResponse;
 import com.codechronicles.core.dto.ArticleLikeResponse;
@@ -24,16 +25,14 @@ import java.net.URISyntaxException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,18 +45,20 @@ public class BlogService {
     private static final String STATUS_PUBLISHED = "PUBLISHED";
     private static final String STATUS_REJECTED = "REJECTED";
 
-    /**
-     * 临时标签提取正则：匹配连续中文词或常见英文技术词。
-     */
-    private static final Pattern TAG_WORD_PATTERN = Pattern.compile("[\\p{IsHan}]{2,}|[A-Za-z][A-Za-z0-9+#.-]{1,}");
-    private static final int MAX_AUTO_TAG_COUNT = 3;
+    private static final int MAX_AUTO_TAG_COUNT = 5;
 
     private final BlogMapper blogMapper;
     private final InteractionRateLimitService interactionRateLimitService;
+    private final ChatClient tagExtractorChatClient;
 
-    public BlogService(BlogMapper blogMapper, InteractionRateLimitService interactionRateLimitService) {
+    public BlogService(
+            BlogMapper blogMapper,
+            InteractionRateLimitService interactionRateLimitService,
+            @Qualifier(AiChatClientConfig.TAG_EXTRACTOR_CHAT_CLIENT) ChatClient tagExtractorChatClient
+    ) {
         this.blogMapper = blogMapper;
         this.interactionRateLimitService = interactionRateLimitService;
+        this.tagExtractorChatClient = tagExtractorChatClient;
     }
 
     /**
@@ -486,60 +487,45 @@ public class BlogService {
                     .forEach(tagIds::add);
         }
 
-        // 当前版本先自动生成临时标签，后续替换为 AI 提取后仍复用后面的入库逻辑。
-        extractTemporaryTags(request.title(), request.summary()).stream()
+        // Spring AI 自动提取标签，后续仍复用统一的查找、创建和绑定逻辑。
+        extractAiTags(request.title(), request.summary()).stream()
                 .map(this::findOrCreateTag)
                 .forEach(tagIds::add);
 
         tagIds.forEach(tagId -> blogMapper.insertArticleTag(articleId, tagId));
     }
 
-    private List<String> extractTemporaryTags(String title, String summary) {
-        String text = ((title == null ? "" : title) + " " + (summary == null ? "" : summary)).trim();
-        if (text.isBlank()) {
+    private List<String> extractAiTags(String title, String summary) {
+        if ((title == null || title.isBlank()) && (summary == null || summary.isBlank())) {
             return List.of();
         }
 
-        // TODO: 后期在这里接入 AI 关键词提取，替换当前从标题和摘要中随机取词的临时实现。
-        Set<String> candidates = new LinkedHashSet<>();
-        Matcher matcher = TAG_WORD_PATTERN.matcher(text);
-        while (matcher.find()) {
-            splitTagCandidate(matcher.group()).stream()
-                    .map(this::normalizeTagName)
-                    .filter(tag -> tag != null && !tag.isBlank())
-                    .forEach(candidates::add);
-        }
-
-        if (candidates.isEmpty()) {
-            return List.of();
-        }
-
-        List<String> tags = new ArrayList<>(candidates);
-        Collections.shuffle(tags);
-        int tagCount = ThreadLocalRandom.current().nextInt(1, Math.min(MAX_AUTO_TAG_COUNT, tags.size()) + 1);
-        return tags.subList(0, tagCount);
+        String aiContent = tagExtractorChatClient.prompt()
+                .user("""
+                        文章标题：%s
+                        文章摘要：%s
+                        """.formatted(title == null ? "" : title, summary == null ? "" : summary))
+                .call()
+                .content();
+        return parseAiTags(aiContent);
     }
 
-    private List<String> splitTagCandidate(String value) {
-        if (value == null || value.isBlank()) {
+    private List<String> parseAiTags(String aiContent) {
+        if (aiContent == null || aiContent.isBlank()) {
             return List.of();
         }
 
-        String text = value.trim();
-        // 长中文串直接入库会像一句话，先切成短块，作为临时标签更适合展示。
-        if (text.codePoints().allMatch(this::isChineseCodePoint) && text.length() > 4) {
-            List<String> chunks = new ArrayList<>();
-            for (int index = 0; index < text.length(); index += 4) {
-                chunks.add(text.substring(index, Math.min(index + 4, text.length())));
+        Set<String> tags = new LinkedHashSet<>();
+        for (String value : aiContent.replace("```", "").split("[,，、;；\\r\\n]+")) {
+            String tag = normalizeTagName(value.replaceFirst("^\\s*(?:[-*]|\\d+[.)、])\\s*", ""));
+            if (tag != null && !tag.isBlank()) {
+                tags.add(tag);
             }
-            return chunks;
+            if (tags.size() >= MAX_AUTO_TAG_COUNT) {
+                break;
+            }
         }
-        return List.of(text);
-    }
-
-    private boolean isChineseCodePoint(int codePoint) {
-        Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
-        return script == Character.UnicodeScript.HAN;
+        return List.copyOf(tags);
     }
 
     private String normalizeTagName(String value) {

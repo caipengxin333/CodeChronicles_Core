@@ -84,6 +84,10 @@
 | `/api/admin/articles` | GET | 管理员获取全部文章列表 |
 | `/api/admin/articles/{id}/review` | POST | 管理员审核文章 |
 | `/api/questions` | GET | 获取问答列表 |
+| `/api/chat/` | GET | AI 通用技术问答，需要登录 |
+| `/api/chat/history` | GET | 获取当前登录用户的 AI 对话历史 |
+| `/api/chat/article` | GET | AI 技术文章生成，需要登录 |
+| `/api/chat/tags` | GET | AI 技术标签提取，需要登录 |
 
 ## 1. 获取图形验证码
 
@@ -815,6 +819,93 @@ GET /api/questions
 | tags | string[] | 标签名称列表 |
 | answerCount | number | 回答数量 |
 | updatedAt | string | 更新时间，格式 `yyyy-MM-dd` |
+
+## 16. AI 接口
+
+三个 AI 接口都必须携带有效登录 Token：
+
+```http
+Authorization: Bearer <token>
+```
+
+### 通用技术问答
+
+```http
+GET /api/chat/?message=请解释Spring Boot事务失效的常见原因
+Authorization: Bearer <token>
+```
+
+### 技术文章生成
+
+```http
+GET /api/chat/article?message=写一篇Spring Boot事务文章
+Authorization: Bearer <token>
+```
+
+### 技术标签提取
+
+```http
+GET /api/chat/tags?message=Spring Boot整合Redis实现接口限流
+Authorization: Bearer <token>
+```
+
+请求参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| message | string | 是 | 提交给 AI 的问题、主题或文章内容 |
+
+成功时 HTTP 状态码为 `200`，响应体直接返回 AI 生成的纯文本，不使用 `ApiResponse` 包装。
+
+通用技术问答使用登录用户手机号作为唯一会话 ID。前端每次只提交当前 `message`，后端会自动读取 Redis 中的历史消息，并在 AI 回答完成后保存本轮用户问题和 AI 回答。
+
+- Redis Key：`${REDIS_KEY_PREFIX}:chat:memory:{手机号}`
+- Redis 类型：`List`
+- 最大消息数：`40` 条，超过后截断最早消息
+- 有效期：`7` 天，每次写入刷新
+- 会话窗口：每个手机号固定一个，不支持新增多个会话
+
+### 获取当前用户聊天历史
+
+```http
+GET /api/chat/history
+Authorization: Bearer <token>
+```
+
+手机号不由前端传入，后端从当前登录信息中获取，并通过固定 Redis 前缀查询对应 List。
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "msg": "success",
+  "data": [
+    {
+      "role": "USER",
+      "content": "Spring事务为什么失效？"
+    },
+    {
+      "role": "ASSISTANT",
+      "content": "常见原因包括同类内部调用和异常被捕获。"
+    }
+  ]
+}
+```
+
+历史消息按时间正序返回，无记录时 `data` 为 `[]`。
+
+未登录、Token 无效或登录状态已过期时，HTTP 状态码为 `401`：
+
+```json
+{
+  "code": 401,
+  "message": "登录已过期，请重新登录",
+  "msg": "登录已过期，请重新登录",
+  "data": null
+}
+```
+
+通用技术问答的完整前端调用示例见 `docs/general-chat-api.md`。
 
 ## 前端联调建议
 

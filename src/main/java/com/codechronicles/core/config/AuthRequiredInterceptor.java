@@ -3,6 +3,7 @@ package com.codechronicles.core.config;
 import com.codechronicles.core.common.ApiResponse;
 import com.codechronicles.core.util.ThreadLocalUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -29,6 +30,10 @@ public class AuthRequiredInterceptor implements HandlerInterceptor {
             HttpServletResponse response,
             Object handler
     ) throws Exception {
+        // Flux 流式响应完成时会触发 ASYNC 二次派发，首次请求已完成登录校验。
+        if (request.getDispatcherType() == DispatcherType.ASYNC) {
+            return true;
+        }
         if (!requiresLogin(request)) {
             return true;
         }
@@ -47,6 +52,9 @@ public class AuthRequiredInterceptor implements HandlerInterceptor {
             return false;
         }
         if ("/api/me".equals(path) && "GET".equalsIgnoreCase(method)) {
+            return true;
+        }
+        if ("/api/chat".equals(path) || path.startsWith("/api/chat/")) {
             return true;
         }
         if (path.startsWith("/api/my/") || path.startsWith("/api/admin/")) {

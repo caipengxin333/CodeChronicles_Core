@@ -109,7 +109,7 @@ public class BlogController {
     }
 
     /**
-     * 新增文章，发布时间、统计字段和临时自动标签由后端生成。
+     * 新增文章，发布时间、统计字段和 AI 自动标签由后端生成。
      */
     @PostMapping("/articles")
     public ApiResponse<ArticleResponse> createArticle(@RequestBody CreateArticleRequest request) {

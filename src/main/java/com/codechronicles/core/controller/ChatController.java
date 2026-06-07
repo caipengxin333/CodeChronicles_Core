@@ -1,31 +1,104 @@
 package com.codechronicles.core.controller;
 
+import com.codechronicles.core.common.ApiResponse;
+import com.codechronicles.core.common.CurrentUserContext;
+import com.codechronicles.core.config.AiChatClientConfig;
+import com.codechronicles.core.dto.ChatHistoryMessageResponse;
+import com.codechronicles.core.util.ThreadLocalUtil;
+import java.util.List;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 
 @RestController
-@RequestMapping("/chat")
+@RequestMapping("/api/chat")
 public class ChatController {
 
-    private final ChatClient chatClient;
+    private final ChatClient generalChatClient;
+    private final ChatClient articleWriterChatClient;
+    private final ChatClient tagExtractorChatClient;
+    private final ChatMemory chatMemory;
 
-    // ChatClient.Builder 由 Spring AI 自动注册，直接注入即可
-    public ChatController(ChatClient.Builder builder) {
-        this.chatClient = builder.build();
+    public ChatController(
+            @Qualifier(AiChatClientConfig.GENERAL_CHAT_CLIENT) ChatClient generalChatClient,
+            @Qualifier(AiChatClientConfig.ARTICLE_WRITER_CHAT_CLIENT) ChatClient articleWriterChatClient,
+            @Qualifier(AiChatClientConfig.TAG_EXTRACTOR_CHAT_CLIENT) ChatClient tagExtractorChatClient,
+            ChatMemory chatMemory
+    ) {
+        this.generalChatClient = generalChatClient;
+        this.articleWriterChatClient = articleWriterChatClient;
+        this.tagExtractorChatClient = tagExtractorChatClient;
+        this.chatMemory = chatMemory;
     }
 
     /**
-     * 最简单的对话接口
-     * GET /chat?message=你好
+     * 通用技术问答，使用 generalChatClient 中预设的系统 Prompt。
+     * GET /api/chat/?message=你好
      */
-    @GetMapping
-    public String chat(@RequestParam String message) {
-        return chatClient.prompt()
+    @GetMapping("/")
+    public Flux<String> chat(@RequestParam String message) {
+        CurrentUserContext currentUser = requireCurrentUser();
+
+        return generalChatClient.prompt()
+                .user(message)
+                .advisors(advisor -> advisor.param(
+                        ChatMemory.CONVERSATION_ID,
+                        currentUser.phone()
+                ))
+                .stream()
+                .content();
+    }
+
+    /**
+     * 获取当前登录用户的聊天历史，手机号从登录上下文中获取。
+     * GET /api/chat/history
+     */
+    @GetMapping("/history")
+    public ApiResponse<List<ChatHistoryMessageResponse>> getChatHistory() {
+        CurrentUserContext currentUser = requireCurrentUser();
+        List<ChatHistoryMessageResponse> history = chatMemory.get(currentUser.phone()).stream()
+                .map(message -> new ChatHistoryMessageResponse(
+                        message.getMessageType().name(),
+                        message.getText()
+                ))
+                .toList();
+        return ApiResponse.success(history);
+    }
+
+    /**
+     * 技术文章生成，使用文章编辑 Prompt。
+     * GET /api/chat/article?message=写一篇Spring Boot事务文章
+     */
+    @GetMapping("/article")
+    public String writeArticle(@RequestParam String message) {
+        return articleWriterChatClient.prompt()
                 .user(message)
                 .call()
                 .content();
+    }
+
+    /**
+     * 技术标签提取，返回英文逗号分隔的标签名称。
+     * GET /api/chat/tags?message=Spring Boot整合Redis实现接口限流
+     */
+    @GetMapping("/tags")
+    public String extractTags(@RequestParam String message) {
+        return tagExtractorChatClient.prompt()
+                .user(message)
+                .call()
+                .content();
+    }
+
+    private CurrentUserContext requireCurrentUser() {
+        CurrentUserContext currentUser = ThreadLocalUtil.get();
+        if (currentUser == null || currentUser.phone() == null || currentUser.phone().isBlank()) {
+            throw new IllegalArgumentException("无法获取当前登录用户手机号");
+        }
+        return currentUser;
     }
 }
