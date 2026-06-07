@@ -1,13 +1,17 @@
 package com.codechronicles.core.service;
 
 import com.codechronicles.core.domain.Article;
+import com.codechronicles.core.domain.ArticleComment;
 import com.codechronicles.core.domain.Profile;
 import com.codechronicles.core.domain.ProfileLink;
 import com.codechronicles.core.domain.Question;
 import com.codechronicles.core.domain.Tag;
 import com.codechronicles.core.common.CurrentUserContext;
 import com.codechronicles.core.dto.ArticleResponse;
+import com.codechronicles.core.dto.ArticleCommentResponse;
+import com.codechronicles.core.dto.ArticleLikeResponse;
 import com.codechronicles.core.dto.CreateArticleRequest;
+import com.codechronicles.core.dto.CreateCommentRequest;
 import com.codechronicles.core.dto.LinkResponse;
 import com.codechronicles.core.dto.PageResponse;
 import com.codechronicles.core.dto.ProfileResponse;
@@ -21,8 +25,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -47,9 +53,11 @@ public class BlogService {
     private static final int MAX_AUTO_TAG_COUNT = 3;
 
     private final BlogMapper blogMapper;
+    private final InteractionRateLimitService interactionRateLimitService;
 
-    public BlogService(BlogMapper blogMapper) {
+    public BlogService(BlogMapper blogMapper, InteractionRateLimitService interactionRateLimitService) {
         this.blogMapper = blogMapper;
+        this.interactionRateLimitService = interactionRateLimitService;
     }
 
     /**
@@ -102,12 +110,90 @@ public class BlogService {
         return new PageResponse<>(total, list);
     }
 
+    @Transactional
     public ArticleResponse getArticleDetail(Long id) {
-        Article article = blogMapper.selectArticleById(id);
-        if (article == null) {
+        int updatedRows = blogMapper.incrementArticleViews(id);
+        if (updatedRows == 0) {
             throw new NoSuchElementException("Article not found: " + id);
         }
+        Article article = blogMapper.selectArticleById(id);
         return toArticleResponse(article);
+    }
+
+    @Transactional
+    public ArticleLikeResponse likeArticle(Long articleId) {
+        CurrentUserContext currentUser = requireCurrentUser();
+        requirePublishedArticle(articleId);
+        interactionRateLimitService.checkLike(currentUser.userId(), articleId);
+        if (blogMapper.countArticleLike(articleId, currentUser.userId()) > 0) {
+            throw new IllegalArgumentException("不能重复点赞");
+        }
+        blogMapper.insertArticleLike(articleId, currentUser.userId());
+        blogMapper.incrementArticleLikes(articleId);
+        return new ArticleLikeResponse(articleId, true, blogMapper.selectArticleLikes(articleId));
+    }
+
+    @Transactional
+    public ArticleLikeResponse unlikeArticle(Long articleId) {
+        CurrentUserContext currentUser = requireCurrentUser();
+        requirePublishedArticle(articleId);
+        interactionRateLimitService.checkLike(currentUser.userId(), articleId);
+        if (blogMapper.deleteArticleLike(articleId, currentUser.userId()) == 0) {
+            throw new IllegalArgumentException("当前文章尚未点赞");
+        }
+        blogMapper.decrementArticleLikes(articleId);
+        return new ArticleLikeResponse(articleId, false, blogMapper.selectArticleLikes(articleId));
+    }
+
+    @Transactional
+    public ArticleCommentResponse createComment(Long articleId, CreateCommentRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("评论内容不能为空");
+        }
+        CurrentUserContext currentUser = requireCurrentUser();
+        requirePublishedArticle(articleId);
+
+        ArticleComment comment = new ArticleComment();
+        comment.setArticleId(articleId);
+        comment.setUserId(currentUser.userId());
+        applyCommentReplyTarget(comment, request.parentCommentId());
+        comment.setContent(requireText(request.content(), "评论内容", 1000));
+        comment.setCreatedAt(LocalDateTime.now());
+        interactionRateLimitService.checkComment(currentUser.userId(), articleId);
+        blogMapper.insertArticleComment(comment);
+        blogMapper.incrementArticleComments(articleId);
+        return toCommentResponse(blogMapper.selectArticleCommentById(comment.getId()), List.of());
+    }
+
+    public PageResponse<ArticleCommentResponse> getArticleComments(Long articleId, int page, int pageSize) {
+        requirePublishedArticle(articleId);
+        int currentPage = Math.max(page, 1);
+        int currentPageSize = Math.min(Math.max(pageSize, 1), 50);
+        int offset = (currentPage - 1) * currentPageSize;
+        long total = blogMapper.countRootArticleComments(articleId);
+        List<ArticleComment> rootComments = blogMapper.selectRootArticleComments(
+                articleId,
+                currentPageSize,
+                offset
+        );
+        if (rootComments.isEmpty()) {
+            return new PageResponse<>(total, List.of());
+        }
+
+        List<Long> rootCommentIds = rootComments.stream().map(ArticleComment::getId).toList();
+        Map<Long, List<ArticleCommentResponse>> repliesByRootId = new HashMap<>();
+        for (ArticleComment reply : blogMapper.selectArticleCommentReplies(rootCommentIds)) {
+            repliesByRootId.computeIfAbsent(reply.getRootCommentId(), ignored -> new ArrayList<>())
+                    .add(toCommentResponse(reply, List.of()));
+        }
+
+        List<ArticleCommentResponse> list = rootComments.stream()
+                .map(comment -> toCommentResponse(
+                        comment,
+                        repliesByRootId.getOrDefault(comment.getId(), List.of())
+                ))
+                .toList();
+        return new PageResponse<>(total, list);
     }
 
     @Transactional
@@ -287,6 +373,50 @@ public class BlogService {
             throw new NoSuchElementException("Article not found: " + id);
         }
         return article;
+    }
+
+    private Article requirePublishedArticle(Long id) {
+        Article article = blogMapper.selectArticleById(id);
+        if (article == null) {
+            throw new NoSuchElementException("Article not found: " + id);
+        }
+        return article;
+    }
+
+    private void applyCommentReplyTarget(ArticleComment comment, Long parentCommentId) {
+        if (parentCommentId == null) {
+            return;
+        }
+        if (parentCommentId <= 0) {
+            throw new IllegalArgumentException("被回复评论ID不正确");
+        }
+
+        ArticleComment parent = blogMapper.selectArticleCommentById(parentCommentId);
+        if (parent == null || !comment.getArticleId().equals(parent.getArticleId())) {
+            throw new NoSuchElementException("Comment not found: " + parentCommentId);
+        }
+        comment.setReplyToCommentId(parent.getId());
+        comment.setRootCommentId(parent.getRootCommentId() == null ? parent.getId() : parent.getRootCommentId());
+    }
+
+    private ArticleCommentResponse toCommentResponse(
+            ArticleComment comment,
+            List<ArticleCommentResponse> replies
+    ) {
+        return new ArticleCommentResponse(
+                comment.getId(),
+                comment.getArticleId(),
+                comment.getUserId(),
+                comment.getUserName(),
+                comment.getUserAvatar(),
+                comment.getRootCommentId(),
+                comment.getReplyToCommentId(),
+                comment.getReplyToUserId(),
+                comment.getReplyToUserName(),
+                comment.getContent(),
+                comment.getCreatedAt(),
+                replies
+        );
     }
 
     private CurrentUserContext requireCurrentUser() {

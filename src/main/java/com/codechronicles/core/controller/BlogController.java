@@ -3,7 +3,10 @@ package com.codechronicles.core.controller;
 import com.codechronicles.core.common.ApiResponse;
 import com.codechronicles.core.domain.Tag;
 import com.codechronicles.core.dto.ArticleResponse;
+import com.codechronicles.core.dto.ArticleCommentResponse;
+import com.codechronicles.core.dto.ArticleLikeResponse;
 import com.codechronicles.core.dto.CreateArticleRequest;
+import com.codechronicles.core.dto.CreateCommentRequest;
 import com.codechronicles.core.dto.PageResponse;
 import com.codechronicles.core.dto.ProfileResponse;
 import com.codechronicles.core.dto.QuestionResponse;
@@ -64,6 +67,45 @@ public class BlogController {
     @GetMapping("/articles/{id}")
     public ApiResponse<ArticleResponse> getArticleDetail(@PathVariable Long id) {
         return ApiResponse.success(blogService.getArticleDetail(id));
+    }
+
+    /**
+     * 当前用户点赞文章，重复点赞不会重复增加计数。
+     */
+    @PostMapping("/articles/{id}/likes")
+    public ApiResponse<ArticleLikeResponse> likeArticle(@PathVariable Long id) {
+        return ApiResponse.success(blogService.likeArticle(id));
+    }
+
+    /**
+     * 当前用户取消文章点赞。
+     */
+    @DeleteMapping("/articles/{id}/likes")
+    public ApiResponse<ArticleLikeResponse> unlikeArticle(@PathVariable Long id) {
+        return ApiResponse.success(blogService.unlikeArticle(id));
+    }
+
+    /**
+     * 当前用户发表评论，评论内容和评论数在同一事务内写入。
+     */
+    @PostMapping("/articles/{id}/comments")
+    public ApiResponse<ArticleCommentResponse> createComment(
+            @PathVariable Long id,
+            @RequestBody CreateCommentRequest request
+    ) {
+        return ApiResponse.success(blogService.createComment(id, request));
+    }
+
+    /**
+     * 分页查询一级评论，每条一级评论携带其二级回复列表。
+     */
+    @GetMapping("/articles/{id}/comments")
+    public ApiResponse<PageResponse<ArticleCommentResponse>> getArticleComments(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize
+    ) {
+        return ApiResponse.success(blogService.getArticleComments(id, page, pageSize));
     }
 
     /**

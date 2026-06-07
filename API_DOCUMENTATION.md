@@ -66,12 +66,17 @@
 | --- | --- | --- |
 | `/api/captcha` | GET | 获取图形验证码 |
 | `/api/login` | POST | 后台登录 |
+| `/api/me` | GET | 获取当前登录用户信息及内容统计 |
 | `/api/profile` | GET | 获取个人资料 |
 | `/api/tags` | GET | 获取标签列表 |
 | `/api/articles` | GET | 获取文章分页列表 |
 | `/api/articles` | POST | 新增文章，默认提交审核 |
 | `/api/articles/drafts` | POST | 保存草稿 |
 | `/api/articles/{id}` | GET | 获取文章详情 |
+| `/api/articles/{id}/comments` | GET | 分页获取文章一级评论及二级回复 |
+| `/api/articles/{id}/comments` | POST | 发表评论或回复评论 |
+| `/api/articles/{id}/likes` | POST | 点赞文章 |
+| `/api/articles/{id}/likes` | DELETE | 取消文章点赞 |
 | `/api/articles/{id}` | PUT | 修改文章 |
 | `/api/articles/{id}` | DELETE | 删除文章，当前为软删除 |
 | `/api/articles/{id}/submit` | POST | 草稿提交审核 |
@@ -181,6 +186,52 @@ Content-Type: application/json
   "data": null
 }
 ```
+
+## 2.1 获取当前登录用户信息
+
+### 请求
+
+```http
+GET /api/me
+Authorization: Bearer <token>
+```
+
+### 响应示例
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "msg": "success",
+  "data": {
+    "id": 1,
+    "phone": "13800138000",
+    "nickname": "CodeChronicles",
+    "name": "CodeChronicles",
+    "avatar": "https://example.com/avatar.png",
+    "role": "全栈开发者",
+    "bio": "记录技术实践。",
+    "location": "Shanghai",
+    "followers": 1280,
+    "articleCount": 5,
+    "publishedArticleCount": 5,
+    "tagCount": 8,
+    "questionCount": 0,
+    "skills": ["Java", "Spring Boot", "MySQL"],
+    "links": []
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `articleCount` | number | 当前用户已发布文章数量，兼容原前端字段 |
+| `publishedArticleCount` | number | 当前用户已发布文章数量，推荐新代码使用 |
+| `tagCount` | number | 当前用户已发布文章关联过的去重标签数量 |
+| `questionCount` | number | 当前用户在文章下发布的评论数量，数据来自 `article_comment`；字段名为兼容前端保持不变 |
+
+以上文章、标签和评论统计全部按当前登录用户计算，没有关联数据时返回 `0`。
+`question` 表仅用于首页精选问答展示，不参与 `/api/me` 的个人统计。
 
 ## 3. 获取个人资料
 
@@ -826,6 +877,24 @@ export interface ProfileResponse {
   links: LinkResponse[];
 }
 
+export interface MeResponse {
+  id: number;
+  phone: string;
+  nickname: string;
+  name: string;
+  avatar: string;
+  role: string;
+  bio: string;
+  location: string;
+  followers: number;
+  articleCount: number;
+  publishedArticleCount: number;
+  tagCount: number;
+  questionCount: number;
+  skills: string[];
+  links: LinkResponse[];
+}
+
 export interface TagResponse {
   id: number;
   name: string;
@@ -942,6 +1011,95 @@ export const reviewArticle = (id: number, data: ReviewArticleRequest) =>
 export const getQuestions = () =>
   request.get<ApiResponse<QuestionResponse[]>>("/questions");
 ```
+
+## 文章评论与二级回复
+
+### 分页查询评论
+
+```http
+GET /api/articles/{id}/comments?page=1&pageSize=20
+```
+
+- 公开接口，不要求登录。
+- `page` 默认 `1`。
+- `pageSize` 默认 `20`，后端限制为 `1` 至 `50`。
+- 分页对象是一级评论，`total` 表示一级评论总数。
+- 每条一级评论通过 `replies` 返回其二级回复。
+- 二级回复可以回复一级评论或其他二级回复，但展示时始终归属同一个一级评论，不产生第三级嵌套。
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "total": 1,
+    "list": [
+      {
+        "id": 10,
+        "articleId": 1,
+        "userId": 1,
+        "userName": "CodeChronicles",
+        "userAvatar": "https://example.com/avatar.png",
+        "rootCommentId": null,
+        "replyToCommentId": null,
+        "replyToUserId": null,
+        "replyToUserName": null,
+        "content": "一级评论 A",
+        "createdAt": "2026-06-06T17:00:00",
+        "replies": [
+          {
+            "id": 11,
+            "articleId": 1,
+            "userId": 2,
+            "userName": "用户 B",
+            "userAvatar": null,
+            "rootCommentId": 10,
+            "replyToCommentId": 10,
+            "replyToUserId": 1,
+            "replyToUserName": "CodeChronicles",
+            "content": "回复 A",
+            "createdAt": "2026-06-06T17:01:00",
+            "replies": []
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 发表评论或回复
+
+```http
+POST /api/articles/{id}/comments
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+一级评论：
+
+```json
+{
+  "content": "一级评论 A"
+}
+```
+
+回复评论：
+
+```json
+{
+  "content": "回复评论 a",
+  "parentCommentId": 10
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `content` | string | 是 | 评论内容，最多 1000 个字符 |
+| `parentCommentId` | number | 否 | 被回复评论 ID；为空时创建一级评论 |
+
+评论默认限流为同一用户对同一文章每 `10s` 一次。回复二级评论时，
+`rootCommentId` 仍指向一级评论，`replyToCommentId` 指向实际被回复的评论。
 
 ## 跨域配置
 

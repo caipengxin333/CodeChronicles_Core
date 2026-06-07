@@ -1,6 +1,7 @@
 package com.codechronicles.core.mapper;
 
 import com.codechronicles.core.domain.Article;
+import com.codechronicles.core.domain.ArticleComment;
 import com.codechronicles.core.domain.Profile;
 import com.codechronicles.core.domain.ProfileLink;
 import com.codechronicles.core.domain.Question;
@@ -80,6 +81,9 @@ public interface BlogMapper {
      */
     long countArticles(@Param("tagId") Long tagId);
 
+    /**
+     * 按作者统计未删除文章；status 不为空时继续按文章状态筛选。
+     */
     long countMyArticles(@Param("authorUserId") Long authorUserId, @Param("status") String status);
 
     long countAdminArticles(@Param("status") String status);
@@ -87,6 +91,16 @@ public interface BlogMapper {
     int countTags();
 
     int countQuestions();
+
+    /**
+     * 统计当前用户在文章下发布的评论数量。
+     */
+    int countUserComments(@Param("userId") Long userId);
+
+    /**
+     * 统计当前用户已发布文章关联过的去重标签数量。
+     */
+    int countUserTags(@Param("userId") Long userId);
 
     /**
      * 分页查询已发布文章；传入 tagId 时按标签过滤。
@@ -113,6 +127,36 @@ public interface BlogMapper {
     Article selectArticleById(@Param("id") Long id);
 
     Article selectArticleForManage(@Param("id") Long id);
+
+    int incrementArticleViews(@Param("id") Long id);
+
+    int selectArticleLikes(@Param("id") Long id);
+
+    int countArticleLike(@Param("articleId") Long articleId, @Param("userId") Long userId);
+
+    int insertArticleLike(@Param("articleId") Long articleId, @Param("userId") Long userId);
+
+    int deleteArticleLike(@Param("articleId") Long articleId, @Param("userId") Long userId);
+
+    int incrementArticleLikes(@Param("id") Long id);
+
+    int decrementArticleLikes(@Param("id") Long id);
+
+    int insertArticleComment(ArticleComment comment);
+
+    int incrementArticleComments(@Param("id") Long id);
+
+    ArticleComment selectArticleCommentById(@Param("id") Long id);
+
+    long countRootArticleComments(@Param("articleId") Long articleId);
+
+    List<ArticleComment> selectRootArticleComments(
+            @Param("articleId") Long articleId,
+            @Param("limit") int limit,
+            @Param("offset") int offset
+    );
+
+    List<ArticleComment> selectArticleCommentReplies(@Param("rootCommentIds") List<Long> rootCommentIds);
 
     /**
      * 查询文章关联的标签名称，用于组装文章列表和详情响应。

@@ -51,6 +51,11 @@ class BlogControllerTest {
             return null;
         }).when(valueOperations).set(anyString(), anyString(), any(Duration.class));
         when(valueOperations.get(anyString())).thenAnswer(invocation -> redisValues.get(invocation.getArgument(0)));
+        when(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
+                .thenAnswer(invocation -> redisValues.putIfAbsent(
+                        invocation.getArgument(0),
+                        invocation.getArgument(1)
+                ) == null);
         when(redisTemplate.delete(anyString())).thenAnswer(invocation -> redisValues.remove(invocation.getArgument(0)) != null);
     }
 
@@ -78,6 +83,70 @@ class BlogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("从零搭建 Spring Boot + Vue 的个人博客系统"))
                 .andExpect(jsonPath("$.data.content").isNotEmpty());
+    }
+
+    @Test
+    void shouldCreateAndPageTwoLevelComments() throws Exception {
+        String token = loginToken();
+        MvcResult rootResult = mockMvc.perform(post("/api/articles/5/comments")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "一级评论 A"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rootCommentId").doesNotExist())
+                .andExpect(jsonPath("$.data.replies.length()").value(0))
+                .andReturn();
+        Number rootCommentId = com.jayway.jsonpath.JsonPath.read(
+                rootResult.getResponse().getContentAsString(),
+                "$.data.id"
+        );
+
+        clearCommentRateLimit();
+        MvcResult replyResult = mockMvc.perform(post("/api/articles/5/comments")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "回复 A 的评论 a",
+                                  "parentCommentId": %d
+                                }
+                                """.formatted(rootCommentId.longValue())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rootCommentId").value(rootCommentId.longValue()))
+                .andExpect(jsonPath("$.data.replyToCommentId").value(rootCommentId.longValue()))
+                .andReturn();
+        Number replyCommentId = com.jayway.jsonpath.JsonPath.read(
+                replyResult.getResponse().getContentAsString(),
+                "$.data.id"
+        );
+
+        clearCommentRateLimit();
+        mockMvc.perform(post("/api/articles/5/comments")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "回复 a，但仍展示在 A 的二级回复列表",
+                                  "parentCommentId": %d
+                                }
+                                """.formatted(replyCommentId.longValue())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rootCommentId").value(rootCommentId.longValue()))
+                .andExpect(jsonPath("$.data.replyToCommentId").value(replyCommentId.longValue()));
+
+        mockMvc.perform(get("/api/articles/5/comments"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list.length()").value(1))
+                .andExpect(jsonPath("$.data.list[0].content").value("一级评论 A"))
+                .andExpect(jsonPath("$.data.list[0].replies.length()").value(2))
+                .andExpect(jsonPath("$.data.list[0].replies[0].content").value("回复 A 的评论 a"))
+                .andExpect(jsonPath("$.data.list[0].replies[1].replyToCommentId").value(replyCommentId.longValue()))
+                .andExpect(jsonPath("$.data.list[0].replies[1].replyToUserName").value("CodeChronicles"));
     }
 
     @Test
@@ -160,10 +229,56 @@ class BlogControllerTest {
                 .andExpect(jsonPath("$.data.location").value("Shanghai"))
                 .andExpect(jsonPath("$.data.followers").value(1280))
                 .andExpect(jsonPath("$.data.articleCount", greaterThan(0)))
+                .andExpect(jsonPath("$.data.publishedArticleCount", greaterThan(0)))
                 .andExpect(jsonPath("$.data.tagCount", greaterThan(0)))
-                .andExpect(jsonPath("$.data.questionCount", greaterThan(0)))
+                .andExpect(jsonPath("$.data.questionCount").isNumber())
+                .andExpect(jsonPath("$.data.commentCount").doesNotExist())
                 .andExpect(jsonPath("$.data.skills", hasItem("Spring Boot")))
                 .andExpect(jsonPath("$.data.links[0].label").value("GitHub"));
+    }
+
+    @Test
+    void shouldReturnZeroPersonalContentCountsForNewUser() throws Exception {
+        String phone = "13700137000";
+        mockMvc.perform(post("/api/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registerPayload(phone)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/me")
+                        .header("Authorization", "Bearer " + loginToken(phone, "Aa123456")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.articleCount").value(0))
+                .andExpect(jsonPath("$.data.publishedArticleCount").value(0))
+                .andExpect(jsonPath("$.data.tagCount").value(0))
+                .andExpect(jsonPath("$.data.questionCount").value(0))
+                .andExpect(jsonPath("$.data.commentCount").doesNotExist());
+    }
+
+    @Test
+    void shouldCountCurrentUsersArticleComments() throws Exception {
+        String phone = "13600136000";
+        mockMvc.perform(post("/api/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registerPayload(phone)))
+                .andExpect(status().isOk());
+        String token = loginToken(phone, "Aa123456");
+
+        mockMvc.perform(post("/api/articles/1/comments")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "用于验证个人评论数量"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.questionCount").value(1))
+                .andExpect(jsonPath("$.data.commentCount").doesNotExist());
     }
 
     @Test
@@ -289,6 +404,10 @@ class BlogControllerTest {
                   "content": "正文由前端提交，发布时间、更新时间、阅读量、点赞数和评论数由后端生成。"
                 }
                 """;
+    }
+
+    private void clearCommentRateLimit() {
+        redisValues.keySet().removeIf(key -> key.contains(":interaction:comment:"));
     }
 
     private String registerPayload(String phone) {

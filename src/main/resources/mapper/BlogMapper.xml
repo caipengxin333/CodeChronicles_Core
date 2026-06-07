@@ -144,6 +144,26 @@
         select count(*) from question
     </select>
 
+    <select id="countUserComments" resultType="int">
+        <!-- COUNT 在用户没有评论时返回 0，接口无需额外补空值。 -->
+        select count(*)
+        from article_comment
+        where user_id = #{userId}
+    </select>
+
+    <select id="countUserTags" resultType="int">
+        <!--
+            标签是全站共享字典，因此不能按 tag 创建人统计。
+            这里只统计本人已发布文章实际关联过的去重标签。
+        -->
+        select count(distinct at.tag_id)
+        from article a
+        inner join article_tag at on at.article_id = a.id
+        where a.author_user_id = #{userId}
+          and a.status = 'PUBLISHED'
+          and a.deleted = 0
+    </select>
+
     <select id="selectArticles" resultType="com.codechronicles.core.domain.Article">
         select distinct
             a.id,
@@ -256,6 +276,148 @@
         from article
         where id = #{id}
           and deleted = 0
+    </select>
+
+    <update id="incrementArticleViews">
+        update article
+        set views = views + 1
+        where id = #{id}
+          and status = 'PUBLISHED'
+          and deleted = 0
+    </update>
+
+    <select id="selectArticleLikes" resultType="int">
+        select likes
+        from article
+        where id = #{id}
+          and status = 'PUBLISHED'
+          and deleted = 0
+    </select>
+
+    <select id="countArticleLike" resultType="int">
+        select count(*)
+        from article_like
+        where article_id = #{articleId}
+          and user_id = #{userId}
+    </select>
+
+    <insert id="insertArticleLike">
+        insert into article_like (article_id, user_id, created_at)
+        values (#{articleId}, #{userId}, current_timestamp)
+    </insert>
+
+    <delete id="deleteArticleLike">
+        delete from article_like
+        where article_id = #{articleId}
+          and user_id = #{userId}
+    </delete>
+
+    <update id="incrementArticleLikes">
+        update article
+        set likes = likes + 1
+        where id = #{id}
+          and status = 'PUBLISHED'
+          and deleted = 0
+    </update>
+
+    <update id="decrementArticleLikes">
+        update article
+        set likes = case when likes > 0 then likes - 1 else 0 end
+        where id = #{id}
+          and status = 'PUBLISHED'
+          and deleted = 0
+    </update>
+
+    <insert id="insertArticleComment" parameterType="com.codechronicles.core.domain.ArticleComment"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into article_comment (
+            article_id,
+            user_id,
+            root_comment_id,
+            reply_to_comment_id,
+            content,
+            created_at
+        )
+        values (
+            #{articleId},
+            #{userId},
+            #{rootCommentId},
+            #{replyToCommentId},
+            #{content},
+            #{createdAt}
+        )
+    </insert>
+
+    <update id="incrementArticleComments">
+        update article
+        set comments = comments + 1
+        where id = #{id}
+          and status = 'PUBLISHED'
+          and deleted = 0
+    </update>
+
+    <sql id="articleCommentColumns">
+        c.id,
+        c.article_id,
+        c.user_id,
+        c.root_comment_id,
+        c.reply_to_comment_id,
+        c.content,
+        c.created_at,
+        p.nickname as user_name,
+        p.avatar as user_avatar,
+        replied_user.id as reply_to_user_id,
+        replied_profile.nickname as reply_to_user_name
+    </sql>
+
+    <select id="selectArticleCommentById" resultType="com.codechronicles.core.domain.ArticleComment">
+        select
+            <include refid="articleCommentColumns"/>
+        from article_comment c
+        inner join `user` u on u.id = c.user_id
+        inner join profile p on p.id = u.profile_id
+        left join article_comment replied_comment on replied_comment.id = c.reply_to_comment_id
+        left join `user` replied_user on replied_user.id = replied_comment.user_id
+        left join profile replied_profile on replied_profile.id = replied_user.profile_id
+        where c.id = #{id}
+    </select>
+
+    <select id="countRootArticleComments" resultType="long">
+        select count(*)
+        from article_comment
+        where article_id = #{articleId}
+          and root_comment_id is null
+    </select>
+
+    <select id="selectRootArticleComments" resultType="com.codechronicles.core.domain.ArticleComment">
+        select
+            <include refid="articleCommentColumns"/>
+        from article_comment c
+        inner join `user` u on u.id = c.user_id
+        inner join profile p on p.id = u.profile_id
+        left join article_comment replied_comment on replied_comment.id = c.reply_to_comment_id
+        left join `user` replied_user on replied_user.id = replied_comment.user_id
+        left join profile replied_profile on replied_profile.id = replied_user.profile_id
+        where c.article_id = #{articleId}
+          and c.root_comment_id is null
+        order by c.created_at desc, c.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="selectArticleCommentReplies" resultType="com.codechronicles.core.domain.ArticleComment">
+        select
+            <include refid="articleCommentColumns"/>
+        from article_comment c
+        inner join `user` u on u.id = c.user_id
+        inner join profile p on p.id = u.profile_id
+        left join article_comment replied_comment on replied_comment.id = c.reply_to_comment_id
+        left join `user` replied_user on replied_user.id = replied_comment.user_id
+        left join profile replied_profile on replied_profile.id = replied_user.profile_id
+        where c.root_comment_id in
+        <foreach collection="rootCommentIds" item="rootCommentId" open="(" separator="," close=")">
+            #{rootCommentId}
+        </foreach>
+        order by c.created_at asc, c.id asc
     </select>
 
     <select id="selectArticleTags" resultType="string">

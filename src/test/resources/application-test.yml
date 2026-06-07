@@ -29,3 +29,6 @@ blog:
   redis:
     key-prefix: cc:test
     captcha-expiration: 2m
+  interaction:
+    like-interval: 3s
+    comment-interval: 10s
