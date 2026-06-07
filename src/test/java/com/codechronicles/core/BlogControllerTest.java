@@ -4,17 +4,29 @@ import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.codechronicles.core.config.AiChatClientConfig;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -25,6 +37,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import reactor.core.publisher.Flux;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -39,6 +52,24 @@ class BlogControllerTest {
 
     @MockBean
     private ValueOperations<String, String> valueOperations;
+
+    @MockBean(name = AiChatClientConfig.TAG_EXTRACTOR_CHAT_CLIENT)
+    private ChatClient tagExtractorChatClient;
+
+    @MockBean(name = AiChatClientConfig.GENERAL_CHAT_CLIENT)
+    private ChatClient generalChatClient;
+
+    @MockBean
+    private ChatClient.ChatClientRequestSpec tagRequestSpec;
+
+    @MockBean
+    private ChatClient.CallResponseSpec tagCallResponseSpec;
+
+    @MockBean
+    private ChatClient.StreamResponseSpec generalStreamResponseSpec;
+
+    @MockBean
+    private ChatMemory chatMemory;
 
     private final Map<String, String> redisValues = new ConcurrentHashMap<>();
 
@@ -57,6 +88,15 @@ class BlogControllerTest {
                         invocation.getArgument(1)
                 ) == null);
         when(redisTemplate.delete(anyString())).thenAnswer(invocation -> redisValues.remove(invocation.getArgument(0)) != null);
+
+        when(tagExtractorChatClient.prompt()).thenReturn(tagRequestSpec);
+        when(generalChatClient.prompt()).thenReturn(tagRequestSpec);
+        when(tagRequestSpec.user(anyString())).thenReturn(tagRequestSpec);
+        when(tagRequestSpec.advisors(any(Consumer.class))).thenReturn(tagRequestSpec);
+        when(tagRequestSpec.call()).thenReturn(tagCallResponseSpec);
+        when(tagRequestSpec.stream()).thenReturn(generalStreamResponseSpec);
+        when(tagCallResponseSpec.content()).thenReturn("Spring Boot, REST API, MyBatis");
+        when(generalStreamResponseSpec.content()).thenReturn(Flux.just("Spring Boot", ", Redis Chat Memory"));
     }
 
     @Test
@@ -296,7 +336,8 @@ class BlogControllerTest {
                 .andExpect(jsonPath("$.data.views").value(0))
                 .andExpect(jsonPath("$.data.likes").value(0))
                 .andExpect(jsonPath("$.data.comments").value(0))
-                .andExpect(jsonPath("$.data.tags.length()", greaterThan(0)));
+                .andExpect(jsonPath("$.data.tags.length()", greaterThan(0)))
+                .andExpect(jsonPath("$.data.tags", hasItem("REST API")));
     }
 
     @Test
@@ -335,6 +376,54 @@ class BlogControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401))
                 .andExpect(jsonPath("$.message").value("登录已过期，请重新登录"));
+    }
+
+    @Test
+    void shouldRejectGeneralChatWithoutLogin() throws Exception {
+        mockMvc.perform(get("/api/chat/").param("message", "你好"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.message").value("登录已过期，请重新登录"));
+    }
+
+    @Test
+    void shouldAllowGeneralChatAfterLogin() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/chat/")
+                        .header("Authorization", "Bearer " + loginToken())
+                        .param("message", "你好"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(content().string("Spring Boot, Redis Chat Memory"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<ChatClient.AdvisorSpec>> advisorCaptor = ArgumentCaptor.forClass(Consumer.class);
+        verify(tagRequestSpec).advisors(advisorCaptor.capture());
+        ChatClient.AdvisorSpec advisorSpec = mock(ChatClient.AdvisorSpec.class);
+        advisorCaptor.getValue().accept(advisorSpec);
+        verify(advisorSpec).param(ChatMemory.CONVERSATION_ID, "13800138000");
+    }
+
+    @Test
+    void shouldReturnCurrentUserChatHistory() throws Exception {
+        when(chatMemory.get("13800138000")).thenReturn(java.util.List.of(
+                new UserMessage("Spring事务为什么失效？"),
+                new AssistantMessage("常见原因包括同类内部调用和异常被捕获。")
+        ));
+
+        mockMvc.perform(get("/api/chat/history")
+                        .header("Authorization", "Bearer " + loginToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].role").value("USER"))
+                .andExpect(jsonPath("$.data[0].content").value("Spring事务为什么失效？"))
+                .andExpect(jsonPath("$.data[1].role").value("ASSISTANT"))
+                .andExpect(jsonPath("$.data[1].content").value("常见原因包括同类内部调用和异常被捕获。"));
+
+        verify(chatMemory).get("13800138000");
     }
 
     @Test
