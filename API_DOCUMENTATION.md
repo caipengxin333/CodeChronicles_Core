@@ -84,7 +84,7 @@
 | `/api/admin/articles` | GET | 管理员获取全部文章列表 |
 | `/api/admin/articles/{id}/review` | POST | 管理员审核文章 |
 | `/api/questions` | GET | 获取问答列表 |
-| `/api/chat/` | GET | AI 通用技术问答，需要登录 |
+| `/api/chat/stream` | POST | AI 通用技术问答 SSE 流，需要登录 |
 | `/api/chat/history` | GET | 获取当前登录用户的 AI 对话历史 |
 | `/api/chat/article` | GET | AI 技术文章生成，需要登录 |
 | `/api/chat/tags` | GET | AI 技术标签提取，需要登录 |
@@ -831,8 +831,16 @@ Authorization: Bearer <token>
 ### 通用技术问答
 
 ```http
-GET /api/chat/?message=请解释Spring Boot事务失效的常见原因
+POST /api/chat/stream
 Authorization: Bearer <token>
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+```json
+{
+  "message": "请解释 Spring Boot 事务失效的常见原因"
+}
 ```
 
 ### 技术文章生成
@@ -849,13 +857,30 @@ GET /api/chat/tags?message=Spring Boot整合Redis实现接口限流
 Authorization: Bearer <token>
 ```
 
-请求参数：
+通用问答请求体：
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| message | string | 是 | 提交给 AI 的问题、主题或文章内容 |
+| message | string | 是 | 当前问题，去除首尾空格后不能超过 4000 个字符 |
 
-成功时 HTTP 状态码为 `200`，响应体直接返回 AI 生成的纯文本，不使用 `ApiResponse` 包装。
+通用问答成功时返回 `text/event-stream;charset=UTF-8`，不使用 `ApiResponse` 包装。事件类型：
+
+| event | data | 说明 |
+| --- | --- | --- |
+| `message` | AI 文本片段 | 前端按顺序追加 |
+| `done` | `[DONE]` | 本次回答正常结束 |
+| `error` | 错误提示 | 流建立后的 AI 调用失败 |
+
+```text
+event:message
+data:Spring Boot 事务常见失效原因包括……
+
+event:done
+data:[DONE]
+
+```
+
+技术文章生成和技术标签提取仍使用 Query String 的 `message` 参数，成功响应为 AI 生成的纯文本。
 
 通用技术问答使用登录用户手机号作为唯一会话 ID。前端每次只提交当前 `message`，后端会自动读取 Redis 中的历史消息，并在 AI 回答完成后保存本轮用户问题和 AI 回答。
 
