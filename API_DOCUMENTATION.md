@@ -155,12 +155,13 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | phone | string | 是 | 手机号，必须为 11 位数字 |
 | password | string | 是 | 用户输入的原始密码，必须包含大写字母、小写字母和数字 |
-| captchaKey | string | 是 | `/api/captcha` 返回的验证码标识 |
-| captcha | string | 是 | 用户输入的验证码文本，后端忽略大小写比较 |
+| captchaKey | string | 普通账号是 | `/api/captcha` 返回的验证码标识；固定游客账号可不传 |
+| captcha | string | 普通账号是 | 用户输入的验证码文本；固定游客账号可不传 |
 
 ### 功能说明
 
-- 后端从 Redis 读取 `cc:captcha:{captchaKey}`。
+- 普通用户和管理员仍从 Redis 读取并校验 `cc:captcha:{captchaKey}`。
+- `ROLE_VISITOR` 固定游客账号在手机号和密码校验通过后可以不提交验证码。
 - 验证码不存在时返回 `验证码已过期`。
 - 验证码比较时会把前端输入和 Redis 中的验证码都转成大写，因此忽略大小写。
 - 验证码校验后会删除 Redis 中的验证码，避免重复使用。
@@ -175,10 +176,24 @@ Content-Type: application/json
   "message": "登录成功",
   "msg": "登录成功",
   "data": {
-    "token": "eyJhbGciOiJIUzI1NiJ9..."
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "role": "USER"
   }
 }
 ```
+
+`role` 为账号权限角色，当前可能为 `USER`、`ADMIN`、`ROLE_VISITOR`。它与 `/api/me` 中表示职业方向的 `role` 字段含义不同。
+
+### 游客登录
+
+```json
+{
+  "phone": "19900000000",
+  "password": "Visitor2026"
+}
+```
+
+游客登录、权限范围和前端按钮实现见 `docs/visitor-login-api.md`。
 
 ### 400 响应示例
 
@@ -969,6 +984,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   token: string;
+  role: "USER" | "ADMIN" | "ROLE_VISITOR";
 }
 
 export interface LinkResponse {

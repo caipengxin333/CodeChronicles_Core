@@ -28,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
+    private static final String ROLE_VISITOR = "ROLE_VISITOR";
+
     private final BlogMapper blogMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -52,8 +54,6 @@ public class AuthService {
 
         String phone = requireText(request.phone(), "手机号");
         String password = requireText(request.password(), "密码");
-        String captchaKey = requireText(request.captchaKey(), "验证码标识");
-        String captcha = requireText(request.captcha(), "验证码");
 
         if (!phone.matches("\\d{11}")) {
             throw new IllegalArgumentException("手机号格式不正确");
@@ -62,10 +62,15 @@ public class AuthService {
             throw new IllegalArgumentException("密码必须包含大写字母、小写字母和数字");
         }
 
-        validateCaptcha(captchaKey, captcha);
-
         User user = blogMapper.selectUserByPhone(phone);
-        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
+        boolean passwordMatches = user != null && passwordEncoder.matches(password, user.getPassword());
+        boolean visitorAccount = user != null && ROLE_VISITOR.equals(user.getRole());
+        if (!visitorAccount) {
+            String captchaKey = requireText(request.captchaKey(), "验证码标识");
+            String captcha = requireText(request.captcha(), "验证码");
+            validateCaptcha(captchaKey, captcha);
+        }
+        if (!passwordMatches) {
             throw new IllegalArgumentException("手机号或密码不正确");
         }
 
@@ -79,7 +84,7 @@ public class AuthService {
         );
         authRedisService.saveToken(currentUser);
         ThreadLocalUtil.set(currentUser);
-        return new LoginResponse(token);
+        return new LoginResponse(token, user.getRole());
     }
 
     @Transactional

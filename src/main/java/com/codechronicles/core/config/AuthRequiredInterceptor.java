@@ -1,6 +1,7 @@
 package com.codechronicles.core.config;
 
 import com.codechronicles.core.common.ApiResponse;
+import com.codechronicles.core.common.CurrentUserContext;
 import com.codechronicles.core.util.ThreadLocalUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.DispatcherType;
@@ -18,6 +19,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
 @Component
 public class AuthRequiredInterceptor implements HandlerInterceptor {
 
+    private static final String ROLE_VISITOR = "ROLE_VISITOR";
+
     private final ObjectMapper objectMapper;
 
     public AuthRequiredInterceptor(ObjectMapper objectMapper) {
@@ -34,10 +37,15 @@ public class AuthRequiredInterceptor implements HandlerInterceptor {
         if (request.getDispatcherType() == DispatcherType.ASYNC) {
             return true;
         }
+        CurrentUserContext currentUser = ThreadLocalUtil.get();
+        if (isVisitor(currentUser) && !isVisitorAllowed(request)) {
+            writeForbidden(response);
+            return false;
+        }
         if (!requiresLogin(request)) {
             return true;
         }
-        if (ThreadLocalUtil.get() != null) {
+        if (currentUser != null) {
             return true;
         }
 
@@ -75,12 +83,37 @@ public class AuthRequiredInterceptor implements HandlerInterceptor {
         );
     }
 
+    private boolean isVisitor(CurrentUserContext currentUser) {
+        return currentUser != null && ROLE_VISITOR.equals(currentUser.role());
+    }
+
+    private boolean isVisitorAllowed(HttpServletRequest request) {
+        String method = request.getMethod();
+        String path = request.getRequestURI();
+        if ("OPTIONS".equalsIgnoreCase(method) || "GET".equalsIgnoreCase(method)) {
+            return !path.startsWith("/api/my/") && !path.startsWith("/api/admin/");
+        }
+        if ("/api/logout".equals(path) && "POST".equalsIgnoreCase(method)) {
+            return true;
+        }
+        return "/api/chat/stream".equals(path) && "POST".equalsIgnoreCase(method);
+    }
+
     private void writeUnauthorized(HttpServletResponse response) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write(objectMapper.writeValueAsString(
                 new ApiResponse<>(401, "登录已过期，请重新登录", null)
+        ));
+    }
+
+    private void writeForbidden(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(objectMapper.writeValueAsString(
+                new ApiResponse<>(403, "游客账号仅支持文章浏览和 AI 对话", null)
         ));
     }
 }
